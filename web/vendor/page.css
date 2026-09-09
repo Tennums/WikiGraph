@@ -1,0 +1,765 @@
+  /* ---- tokens: light is the base, dark redefines only what changes -------- */
+  .vault-graph {
+    color-scheme: light;
+    --surface-0: #f4f3f0;
+    --surface-1: #fcfcfb;
+    --surface-2: #ffffff;
+    --border:    #dedcd5;
+    --border-strong: #c4c2b8;
+    --text-1: #0b0b0b;
+    --text-2: #52514e;
+    --text-3: #86857d;
+    /* design/0005 */
+    --edge:      #e8e7e1;
+    --edge-hi:   #2a78d6;
+    --dim:       #e6e5df;
+    --today:     #0b0b0b;
+    --g1: #2a78d6;
+    --g2: #eb6834;
+    --g3: #1baf7a;
+    --g4: #eda100;
+    --g5: #008300;
+    --g6: #d3006e;
+    --g7: #4a3aa7;
+    --g8: #e34948;
+    --g9: #00aecb;
+    --g10:#9412ad;
+    --g11:#6f6e67;
+    --g12:#45443f;
+    --n1: #6f6e67;
+    --n2: #45443f;
+    --n3: #8a897f;
+    --accent: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    .vault-graph:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-0: #121211;
+      --surface-1: #1a1a19;
+      --surface-2: #232322;
+      --border:    #33332f;
+      --border-strong: #4a4a45;
+      --text-1: #ffffff;
+      --text-2: #c3c2b7;
+      --text-3: #8d8c84;
+      --edge:      #333330;
+      --edge-hi:   #3987e5;
+      --dim:       #2a2a28;
+      --today:     #ffffff;
+      --g1: #3987e5; --g2: #d95926; --g3: #199e70; --g4: #c98500;
+      --g5: #008300; --g6: #eb1580; --g7: #9085e9; --g8: #e66767;
+      --g9: #009fbb; --g10:#b429d1;
+      --g11:#8d8c84; --g12:#bdbcb2;
+      --n1: #8d8c84; --n2: #bdbcb2; --n3: #77766d;
+      --accent: #3987e5;
+    }
+  }
+  .vault-graph[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0: #121211;
+    --surface-1: #1a1a19;
+    --surface-2: #232322;
+    --border:    #33332f;
+    --border-strong: #4a4a45;
+    --text-1: #ffffff;
+    --text-2: #c3c2b7;
+    --text-3: #8d8c84;
+    --edge:      #333330;
+    --edge-hi:   #3987e5;
+    --dim:       #2a2a28;
+    --today:     #ffffff;
+    --g1: #3987e5; --g2: #d95926; --g3: #199e70; --g4: #c98500;
+    --g5: #008300; --g6: #eb1580; --g7: #9085e9; --g8: #e66767;
+    --g9: #009fbb; --g10:#b429d1;
+    --g11:#8d8c84; --g12:#bdbcb2;
+    --n1: #8d8c84; --n2: #bdbcb2; --n3: #77766d;
+    --accent: #3987e5;
+  }
+
+  .vault-graph, .vault-graph * { box-sizing: border-box; }
+  .vault-graph [hidden][hidden] { display: none; }
+  .vault-graph #vg-busy[hidden],
+  .vault-graph #vg-tip[hidden],
+  .vault-graph #vg-detail[hidden],
+  .vault-graph #vg-htip[hidden],
+  .vault-graph #vg-logo[hidden],
+  .vault-graph #vg-logoInner[hidden] { display: none; }
+  .vault-graph { height: 100%; margin: 0; }
+  .vault-graph {
+    background: var(--surface-1);
+    color: var(--text-1);
+    font: 13px/1.45 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .vault-graph { display: grid; grid-template-columns: 288px 1fr; height: 100%; }
+
+  /* ---------------------------------------------------------- sidebar ----- */
+  .vault-graph #vg-sidebar {
+    background: var(--surface-0);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 14px 14px 28px;
+    display: flex; flex-direction: column; gap: 18px;
+  }
+  .vault-graph .brand { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .vault-graph .brand h1 { font-size: 14px; margin: 0; letter-spacing: -0.01em; }
+  .vault-graph .brand .sub { font-size: 11px; color: var(--text-3); }
+
+  .vault-graph .block > .lbl {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--text-3); margin-bottom: 7px; font-weight: 600;
+  }
+
+  .vault-graph .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .vault-graph .seg button {
+    font: inherit; font-size: 12px; padding: 6px 8px; cursor: pointer;
+    background: var(--surface-2); color: var(--text-2);
+    border: 1px solid var(--border); border-radius: 6px; text-align: left;
+  }
+  .vault-graph .seg button:hover { border-color: var(--border-strong); color: var(--text-1); }
+  .vault-graph .seg button[aria-pressed="true"] {
+    background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+  }
+
+  .vault-graph input[type="search"] {
+    width: 100%; font: inherit; padding: 7px 9px; border-radius: 6px;
+    background: var(--surface-2); color: var(--text-1); border: 1px solid var(--border);
+  }
+  .vault-graph input[type="search"]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  .vault-graph .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .vault-graph .row .val { font-variant-numeric: tabular-nums; color: var(--text-2); font-size: 11px; }
+
+  .vault-graph #vg-legend { display: flex; flex-direction: column; gap: 1px; }
+
+  .vault-graph .lgr { display: flex; align-items: center; gap: 2px; }
+  .vault-graph .lgr.sub { padding-left: 14px; }
+  .vault-graph .lgr.sub2 { padding-left: 28px; }
+  .vault-graph .lgr.sub3 { padding-left: 42px; }
+  .vault-graph .lgr.sub4 { padding-left: 54px; }
+  /* github#3 */
+  .vault-graph .lgr-empty { opacity: 0.55; }
+  .vault-graph .lgr-empty:hover, .vault-graph .lgr-empty:focus-within { opacity: 1; }
+
+  .vault-graph .tw, .vault-graph .eye {
+    flex: none; background: none; border: 0; padding: 2px; cursor: pointer;
+    color: var(--text-3); line-height: 0; border-radius: 4px;
+  }
+  .vault-graph .tw { width: 16px; height: 18px; font: inherit; font-size: 9px; line-height: 1;
+        color: var(--text-3); }
+  .vault-graph .tw:hover, .vault-graph .eye:hover { color: var(--text-1); background: var(--surface-2); }
+  .vault-graph .tw[aria-expanded="true"] { color: var(--text-2); }
+  /* github#50 */
+  .vault-graph .tw.none, .vault-graph .eye.none, .vault-graph .lg .only.none {
+    visibility: hidden; cursor: default;
+  }
+  .vault-graph .eye { width: 20px; height: 18px; }
+  .vault-graph .eye svg { width: 14px; height: 14px; display: block; }
+  .vault-graph .eye[aria-pressed="false"] { color: var(--text-3); opacity: .6; }
+
+  .vault-graph .lg {
+    display: grid; grid-template-columns: 12px 1fr auto auto; align-items: center;
+    gap: 8px; padding: 4px 6px; border-radius: 5px; cursor: pointer;
+    border: 1px solid transparent; text-align: left; background: none;
+    font: inherit; color: var(--text-1); flex: 1; min-width: 0;
+    /* github#78 -- this is a <button>, and Obsidian gives every button an inset
+       shadow that paints OVER a background image. Reset it or the host decides
+       whether the count bar is visible. design/0006 */
+    box-shadow: none;
+  }
+  .vault-graph .lg[data-hl="on"], .vault-graph .lgs[data-hl="on"] {
+    background-color: color-mix(in srgb, var(--accent) 22%, transparent);
+    border-color: var(--accent);
+    box-shadow: inset 2px 0 0 0 var(--accent);
+    color: var(--text-1);
+  }
+  .vault-graph .lg[data-hl="on"] .ct, .vault-graph .lgs[data-hl="on"] .ct { color: var(--text-2); }
+  /* github#78 -- background-COLOR, not the shorthand. The shorthand resets
+     background-image; .lg.bar out-orders it as written, so this buys independence
+     from rule order rather than fixing a live bug. Measured: invariants.md. */
+  .vault-graph .lg:hover { background-color: var(--surface-2); border-color: var(--border); }
+  /* github#78 -- the count bar: this row's share of the vault, drawn along the bottom of
+     the row in the group's own colour. A background layer rather than a fifth grid cell
+     because .nm is the only 1fr and already truncates; the row is one width on every row
+     (219px measured) while .nm is not (122/117/141px), so the row is the honest track.
+     The selector carries #vg-legend for SPECIFICITY, not for scoping: a plain
+     `.vault-graph .lg.bar` ties with `.vault-graph .lg:hover` and loses to whichever
+     comes last, and a stale plugin stylesheet in the host document put a `background`
+     SHORTHAND on hover after it -- wiping every longhand and the bar with them. An id
+     makes the rule win on merit rather than on order. github#78
+
+     It starts 2px in, which is what keeps it: the highlight's leading accent band is
+     an `inset 2px` shadow and inset shadows paint OVER a background image, so a bar
+     flush to the edge lost its first 2px and a floored one vanished. It stays in the
+     padding strip BELOW the content, where no grid item can cover it -- moving the
+     origin to content-box fixed the band and let the `only` chip cover the bar
+     instead. The floor is 4px so that no state paints fewer than 3px — lifted to 0 by
+     `--vg-floor` on a row walking down to nothing, or the shrink ends in a 4px stub
+     that blinks out. design/0006 */
+  .vault-graph #vg-legend .lg.bar {
+    background-image: linear-gradient(var(--vg-bar), var(--vg-bar));
+    background-repeat: no-repeat;
+    background-position: 2px 100%;
+    background-size: max(var(--vg-floor, 4px), var(--vg-share)) 2px;
+  }
+  .vault-graph #vg-legend .lg.bar.bar-out { --vg-floor: 0px; }
+  .vault-graph .lg .sw { width: 11px; height: 11px; border-radius: 50%; }
+  .vault-graph .lg .sw.sw-in { transform: scale(0.6); }
+  .vault-graph .lg .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vault-graph .lg .ct { font-size: 11px; }
+  .vault-graph .lg .ct, .vault-graph .lgs .ct {
+    color: var(--text-3); font-variant-numeric: tabular-nums;
+    min-width: 3ch; text-align: right;
+  }
+  .vault-graph .lg .only, .vault-graph .lgs .only {
+    font-size: 10px; color: var(--text-3); opacity: 0; padding: 1px 4px;
+    border: 1px solid var(--border-strong); border-radius: 4px;
+    background: var(--surface-1); line-height: 1.3; white-space: nowrap;
+  }
+  .vault-graph .lgs .only { font-size: 9px; }
+  .vault-graph .lg:hover .only, .vault-graph .lgs:hover .only { opacity: 1; }
+  .vault-graph .lg .only:hover, .vault-graph .lgs .only:hover {
+    color: var(--text-1); border-color: var(--accent);
+  }
+  .vault-graph .lgs {
+    display: grid; grid-template-columns: 10px 1fr auto auto; align-items: center;
+    gap: 7px; padding: 2px 6px; color: var(--text-2);
+    font: inherit; font-size: 11px; background: none;
+    border: 1px solid transparent; border-radius: 5px;
+    flex: 1; min-width: 0; text-align: left; cursor: pointer;
+  }
+  .vault-graph .lgs:hover { background: var(--surface-2); border-color: var(--border); color: var(--text-1); }
+  .vault-graph .lgs[aria-pressed="false"] { opacity: .35; }
+  .vault-graph .lgs[aria-pressed="false"] .nm { text-decoration: line-through; }
+  .vault-graph .lgs .sw { width: 10px; height: 10px; border-radius: 2px; }
+  .vault-graph .lgs .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vault-graph .lg[aria-pressed="false"] { opacity: .38; }
+  .vault-graph .lg[aria-pressed="false"] .nm { text-decoration: line-through; }
+
+  .vault-graph .mini { display: flex; flex-wrap: wrap; gap: 5px; }
+
+  .vault-graph #vg-stats { font-size: 11px; color: var(--text-3); line-height: 1.6; }
+  .vault-graph #vg-stats b { color: var(--text-2); font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  .vault-graph .tools { display: flex; flex-wrap: wrap; gap: 5px; }
+  .vault-graph .tools button, .vault-graph .mini button, .vault-graph button.btn {
+    font: inherit; font-size: 11px; padding: 5px 8px; cursor: pointer;
+    background: var(--surface-2); color: var(--text-2);
+    border: 1px solid var(--border); border-radius: 6px;
+  }
+  .vault-graph .tools button:hover, .vault-graph .mini button:hover, .vault-graph button.btn:hover {
+    color: var(--text-1); border-color: var(--border-strong);
+  }
+  .vault-graph .mini button[aria-pressed="true"], .vault-graph button.btn[aria-pressed="true"] {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+  }
+
+  /* --------------------------------------------------------- settings ----- */
+  .vault-graph .gear {
+    font: inherit; font-size: 13px; line-height: 1; cursor: pointer;
+    padding: 3px 5px; border-radius: 6px;
+    background: none; border: 1px solid transparent; color: var(--text-3);
+  }
+  .vault-graph .gear:hover { color: var(--text-1); border-color: var(--border); }
+  .vault-graph .gear[aria-expanded="true"] {
+    color: var(--text-1); background: var(--surface-2); border-color: var(--border);
+  }
+  .vault-graph .sr {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0); white-space: nowrap;
+  }
+
+  .vault-graph .scr { margin-bottom: 9px; }
+  .vault-graph .scrh {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 6px; margin-bottom: 4px;
+  }
+  .vault-graph .vis { flex: 0 0 auto; }
+  .vault-graph .scrh .nm {
+    flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--text-2);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .vault-graph .sws { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .vault-graph #vg-setbody { max-height: 46vh; overflow-y: auto; }
+  .vault-graph #vg-setbody .sws {
+    display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px;
+  }
+  .vault-graph #vg-setbody .swatch { width: 100%; height: auto; aspect-ratio: 1; }
+  .vault-graph .swatch {
+    width: 18px; height: 18px; padding: 0; cursor: pointer; border-radius: 50%;
+    border: 1px solid var(--border);
+  }
+  .vault-graph .swatch.vg-g1  { background: var(--g1); }
+  .vault-graph .swatch.vg-g2  { background: var(--g2); }
+  .vault-graph .swatch.vg-g3  { background: var(--g3); }
+  .vault-graph .swatch.vg-g4  { background: var(--g4); }
+  .vault-graph .swatch.vg-g5  { background: var(--g5); }
+  .vault-graph .swatch.vg-g6  { background: var(--g6); }
+  .vault-graph .swatch.vg-g7  { background: var(--g7); }
+  .vault-graph .swatch.vg-g8  { background: var(--g8); }
+  .vault-graph .swatch.vg-g9  { background: var(--g9); }
+  .vault-graph .swatch.vg-g10 { background: var(--g10); }
+  .vault-graph .swatch.vg-g11 { background: var(--g11); }
+  .vault-graph .swatch.vg-g12 { background: var(--g12); }
+
+  .vault-graph.vg-tokens {
+    display: block; height: auto; overflow: visible; position: static;
+    background: none; color: inherit; font: inherit; color-scheme: inherit;
+  }
+
+  .vault-graph.vg-tokens .vg-subrow {
+    margin-left: 24px; padding-top: 6px; padding-bottom: 6px; border-top: none;
+  }
+  .vault-graph.vg-tokens .sws { flex-wrap: wrap; justify-content: flex-end; }
+  .vault-graph .swatch:hover { transform: scale(1.15); }
+  .vault-graph .swatch[aria-checked="true"] {
+    box-shadow: 0 0 0 1px var(--surface-0), 0 0 0 2px var(--text-1);
+  }
+  .vault-graph .swatch[aria-checked="true"][data-auto="1"] {
+    box-shadow: 0 0 0 1px var(--surface-0), 0 0 0 2px var(--text-3);
+  }
+  .vault-graph .swatch[data-auto="1"]:not([aria-checked="true"]) {
+    position: relative;
+  }
+  .vault-graph .swatch[data-auto="1"]:not([aria-checked="true"])::after {
+    content: "";
+    position: absolute;
+    left: 50%; bottom: -4px;
+    width: 6px; height: 4px;
+    transform: translateX(-50%);
+    background:
+      linear-gradient(to bottom right, transparent 50%, var(--today) 50%) left / 50% 100% no-repeat,
+      linear-gradient(to bottom left, transparent 50%, var(--today) 50%) right / 50% 100% no-repeat;
+  }
+  .vault-graph .scr .auto {
+    font: inherit; font-size: 10px; padding: 2px 6px; cursor: pointer; margin-left: 2px;
+    background: var(--surface-2); color: var(--text-3);
+    border: 1px solid var(--border); border-radius: 6px;
+  }
+  .vault-graph .scr .auto[aria-pressed="true"] { color: var(--text-1); }
+  .vault-graph .hint {
+    font-size: 10px; color: var(--text-3); line-height: 1.5; margin: 8px 0 0;
+  }
+
+  /* ------------------------------------------------------------ stage ----- */
+  .vault-graph #vg-stage { position: relative; overflow: hidden; background: var(--surface-1);
+           display: grid; grid-template-rows: auto 1fr; }
+  .vault-graph #vg-canvas { position: relative; overflow: hidden; }
+  .vault-graph canvas.vg-wedge-debug {
+    position: absolute; left: 0; top: 0; pointer-events: none; z-index: 6;
+  }
+  .vault-graph canvas.vg-wedge-debug[hidden] { display: none; }
+  .vault-graph #vg-graph { position: absolute; inset: 0; }
+  /* github#58 */
+  .vault-graph #vg-graph .vg-layer { position: absolute; }
+  .vault-graph #vg-graph .vg-layer-mouse { touch-action: none; user-select: none; }
+  /* github#4 */
+  .vault-graph {
+    --controls-inset: 12px;
+    --controls-h: 142px;
+    /* github#82 -- the panel cluster's own inset, and deliberately NOT --controls-inset:
+       the plugin raises that one to 44px because Obsidian's status bar floats over the
+       bottom-right corner (github#4). Nothing floats over the top-left, so the toggles
+       would have been pushed 44px into the disc for a reason that is not theirs. */
+    --panels-inset: 12px;
+  }
+  .vault-graph #vg-cam {
+    position: absolute; right: var(--controls-inset); bottom: var(--controls-inset);
+    z-index: 6; display: flex; flex-direction: column; gap: 6px;
+  }
+  /* github#73 -- the two panel buttons wear the camera cluster's look
+     github#82 -- and are drawn at every width. They were the phone's alone until two users
+     asked for the same fold on a PC; the state machine behind them never was touch-specific.
+     The cluster sits in the opposite corner from #vg-cam and at the same z-index; only the
+     phone raises it, because only there is a panel drawn over it. */
+  .vault-graph #vg-mob {
+    position: absolute; left: var(--panels-inset); top: var(--panels-inset);
+    z-index: 6; display: flex; flex-direction: row; gap: 6px;
+  }
+  .vault-graph #vg-cam button, .vault-graph #vg-mob button {
+    display: flex; align-items: center; justify-content: center;
+    width: 31px; height: 31px; padding: 0; cursor: pointer;
+    background: var(--surface-2); color: var(--text-3);
+    border: 1px solid var(--border); border-radius: 8px;
+    opacity: .55; transition: opacity .12s, color .12s, border-color .12s, background-color .12s;
+  }
+  .vault-graph #vg-cam button:hover, .vault-graph #vg-mob button:hover { opacity: 1; color: var(--text-1); border-color: var(--border-strong); }
+  .vault-graph #vg-cam button:focus-visible, .vault-graph #vg-mob button:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
+  .vault-graph #vg-pan { margin-top: 4px; }
+  .vault-graph #vg-pan[aria-pressed="true"], .vault-graph #vg-band[aria-pressed="true"], .vault-graph #vg-sheet[aria-expanded="true"] {
+    opacity: .8; color: var(--accent); border-color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 12%, var(--surface-2));
+  }
+  .vault-graph #vg-pan[aria-pressed="true"]:hover { opacity: 1; color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) {
+    .vault-graph #vg-cam button { transition: none; }
+  }
+
+  .vault-graph #vg-compact {
+    display: flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; padding: 0; cursor: pointer; flex: 0 0 auto; margin-left: 8px;
+    background: var(--surface-2); color: var(--text-3);
+    border: 1px solid var(--border); border-radius: 6px;
+    transition: color .12s, border-color .12s, background-color .12s;
+  }
+  .vault-graph #vg-compact:hover { color: var(--text-1); border-color: var(--border-strong); }
+  .vault-graph #vg-compact:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .vault-graph #vg-compact[aria-pressed="true"] {
+    color: var(--accent); border-color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 14%, var(--surface-2));
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .vault-graph #vg-compact { transition: none; }
+  }
+
+  .vault-graph #vg-rangebox {
+    display: flex; align-items: center; gap: 5px; flex: 0 0 auto; margin-left: 4px;
+  }
+  .vault-graph #vg-rangebox .arw { color: var(--text-3); font-size: 11px; }
+  .vault-graph #vg-rangebox .dt {
+    font: 11px/1.3 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    color: var(--text-2); background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 5px;
+    padding: 2px 4px; width: 104px; min-width: 0;
+  }
+  .vault-graph #vg-rangebox .dt:hover { border-color: var(--border-strong); color: var(--text-1); }
+  .vault-graph #vg-rangebox .dt:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px; color: var(--text-1);
+  }
+  .vault-graph #vg-rangebox .dt::-webkit-calendar-picker-indicator {
+    opacity: .45; cursor: pointer; padding: 0; margin-left: 2px;
+  }
+  .vault-graph #vg-rangebox .dt::-webkit-calendar-picker-indicator:hover { opacity: .9; }
+
+  .vault-graph #vg-years { position: relative; height: 16px; margin-top: -5px; }
+  .vault-graph #vg-years button {
+    position: absolute; top: 0; transform: translateX(-50%);
+    /* github#23 */
+    height: 14px;
+    padding: 0 5px; cursor: pointer; border-radius: 4px;
+    background: color-mix(in oklab, var(--text-3) 14%, transparent);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    font: 600 9.5px/14px ui-sans-serif, "Segoe UI", system-ui, sans-serif;
+    font-variant-numeric: tabular-nums;
+    transition: background-color .12s, color .12s, border-color .12s;
+  }
+  .vault-graph #vg-years button:hover {
+    color: var(--text-1); border-color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 26%, transparent);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .vault-graph #vg-years button { transition: none; }
+  }
+  .vault-graph #vg-years button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 0; color: var(--text-1);
+  }
+  .vault-graph #vg-years button[aria-pressed="true"] {
+    color: var(--accent); background: color-mix(in oklab, var(--accent) 14%, transparent);
+  }
+
+  /* ---------------------------------------------------------- heatmap ----- */
+  .vault-graph #vg-heat {
+    position: relative; padding: 9px 14px 8px;
+    border-bottom: 1px solid var(--border); background: var(--surface-0);
+    display: flex; flex-direction: column; gap: 6px; min-width: 0;
+  }
+  /* github#82 -- the band folds away at every width, so these two live outside the
+     breakpoint. design/0010 gives the band its own grid row precisely so it cannot collide
+     with the disc, and hiding the row honours that where floating the band over the disc
+     would not. The row has to be pinned to 1fr with the band gone or #vg-canvas inherits the
+     stage's `auto` and collapses to nothing -- every child of it is absolutely positioned.
+     The phone's branch keys the same two properties off [data-band="on"]; one attribute
+     cannot hold both values, so the two can never fight. */
+  .vault-graph[data-band="off"] #vg-heat { display: none; }
+  .vault-graph[data-band="off"] #vg-stage { grid-template-rows: 1fr; }
+  .vault-graph #vg-heat .hrow { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .vault-graph #vg-heat .hrow .lbl {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--text-3); font-weight: 600; flex: 0 0 auto;
+  }
+  .vault-graph #vg-heatnote {
+    font-size: 11px; color: var(--text-3); min-width: 0; flex: 1 1 auto;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .vault-graph #vg-heatscale {
+    margin-left: auto; flex: 0 0 auto; display: flex; align-items: center; gap: 3px;
+    font-size: 10px; color: var(--text-3);
+  }
+  .vault-graph #vg-heatscale canvas { display: block; }
+  /* ------------------------------------------------------ date range ----- */
+  .vault-graph #vg-ribbon {
+    display: block; width: 100%; cursor: crosshair;
+    touch-action: none;
+  }
+  .vault-graph #vg-ribbon[data-grab="edge"] { cursor: ew-resize; }
+  .vault-graph #vg-ribbon[data-grab="body"] { cursor: grab; }
+  .vault-graph #vg-ribbon[data-grab="moving"] { cursor: grabbing; }
+  .vault-graph #vg-rangenote {
+    font-size: 11px; color: var(--text-2); flex: 0 0 auto;
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .vault-graph #vg-rangeall { flex: 0 0 auto; }
+  .vault-graph #vg-rtip {
+    position: absolute; pointer-events: none; z-index: 8; white-space: nowrap;
+    background: var(--surface-2); border: 1px solid var(--border-strong);
+    border-radius: 5px; padding: 2px 6px;
+    font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text-1);
+    box-shadow: 0 4px 14px rgba(0,0,0,.22);
+  }
+  .vault-graph #vg-rtip[hidden] { display: none; }
+
+  .vault-graph #vg-heatwrap { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
+              scrollbar-color: var(--border-strong) transparent; }
+  .vault-graph #vg-heatc { display: block; cursor: pointer; margin: 0 auto; }
+  .vault-graph #vg-htip {
+    position: absolute; pointer-events: none; z-index: 7; max-width: 240px;
+    background: var(--surface-2); border: 1px solid var(--border-strong);
+    border-radius: 7px; padding: 6px 9px; font-size: 12px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.18); display: block;
+  }
+  .vault-graph #vg-htip .t { font-weight: 600; margin-bottom: 2px; }
+  .vault-graph #vg-htip .m { color: var(--text-2); font-size: 11px; }
+
+  .vault-graph #vg-logo, .vault-graph #vg-logoInner {
+    position: absolute; display: block; pointer-events: none;
+    transform: translate(-50%, -50%);
+    opacity: .95;
+    transition: opacity 380ms ease;
+    -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+    -webkit-mask-position: center;  mask-position: center;
+    -webkit-mask-size: contain;     mask-size: contain;
+  }
+  .vault-graph #vg-logoInner {
+    -webkit-mask-composite: source-in;
+    mask-composite: intersect;
+  }
+  .vault-graph[data-theme="light"] #vg-logo { opacity: .9; filter: saturate(1.05) brightness(.86); }
+
+  /* github#12 */
+  .vault-graph #vg-hubdrop {
+    position: absolute; display: block; pointer-events: none;
+    transform: translate(-50%, -50%); border-radius: 50%;
+    border: 2px dashed var(--text-3); opacity: .55;
+    transition: opacity 120ms linear, background-color 120ms linear;
+  }
+  .vault-graph #vg-hubdrop[hidden] { display: none; }
+  .vault-graph #vg-hubdrop[data-over="1"] {
+    border-style: solid; border-color: var(--accent); opacity: 1;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+  .vault-graph #vg-hubdrop[data-drop="out"] { border-color: var(--text-3); opacity: .32; }
+
+  .vault-graph #vg-tip {
+    position: absolute; pointer-events: none; z-index: 5; max-width: 260px;
+    background: var(--surface-2); border: 1px solid var(--border-strong);
+    border-radius: 7px; padding: 7px 9px; font-size: 12px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.18); display: block;
+  }
+  .vault-graph #vg-tip .t { font-weight: 600; margin-bottom: 3px; }
+  .vault-graph #vg-tip .m { color: var(--text-2); font-size: 11px; }
+
+  .vault-graph #vg-detail {
+    position: absolute; right: 12px; top: 12px; width: 278px; z-index: 6;
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 9px; padding: 12px; display: block;
+    box-shadow: 0 8px 28px rgba(0,0,0,.16); overflow-y: auto;
+    max-height: calc(100% - 28px - var(--controls-h) - var(--controls-inset));
+  }
+  .vault-graph #vg-detail h2 { font-size: 13px; margin: 0 22px 6px 0; line-height: 1.3; }
+  .vault-graph #vg-detail .meta { font-size: 11px; color: var(--text-2); margin-bottom: 9px; }
+  .vault-graph #vg-detail .meta span { display: inline-block; margin-right: 8px; }
+  .vault-graph #vg-detail .chip {
+    display: inline-block; font-size: 10px; padding: 1px 6px; margin: 0 3px 3px 0;
+    border: 1px solid var(--border); border-radius: 999px; color: var(--text-2);
+  }
+  .vault-graph #vg-detail .nb { font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
+                color: var(--text-3); margin: 10px 0 5px; font-weight: 600; }
+  .vault-graph #vg-detail .actions {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px;
+  }
+  .vault-graph #vg-detail a.open {
+    display: inline-block; font-size: 11px; color: var(--accent);
+    text-decoration: none; border: 1px solid var(--accent);
+    border-radius: 6px; padding: 4px 8px;
+  }
+  .vault-graph #vg-detail a.open:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .vault-graph #vg-detail .pin svg { width: 13px; height: 13px; vertical-align: -2px; margin-right: 3px; }
+  /* github#40, design/0012 */
+  .vault-graph #vg-detail .crumbs { display: flex; align-items: center; gap: 4px; margin: 0 22px 7px 0; }
+  .vault-graph #vg-detail .crumbs ol {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0;
+    list-style: none; margin: 0; padding: 0; min-width: 0;
+  }
+  .vault-graph #vg-detail .crumbs li { display: flex; align-items: center; min-width: 0; }
+  .vault-graph #vg-detail .crumbs li + li::before {
+    content: "\203A" / ""; color: var(--text-3); font-size: 10px; padding: 0 3px;
+  }
+  .vault-graph #vg-detail .crumbs button {
+    font: inherit; font-size: 10px; color: var(--text-2); background: none; border: 0;
+    padding: 1px 2px; cursor: pointer; border-radius: 4px;
+    max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .vault-graph #vg-detail .crumbs button:hover { color: var(--text-1); background: var(--surface-1); }
+  .vault-graph #vg-detail .crumbs button.off { color: var(--text-3); font-style: italic; }
+  .vault-graph #vg-detail .crumbs .nvb {
+    flex: none; font-size: 13px; line-height: 1; color: var(--text-1);
+    border: 1px solid var(--border); padding: 1px 7px;
+  }
+  .vault-graph #vg-detail .crumbs .dots { color: var(--text-3); font-size: 10px; }
+  .vault-graph #vg-detail ul { list-style: none; margin: 0; padding: 0; }
+  .vault-graph #vg-detail li button {
+    background: none; border: 0; padding: 2px 0; font: inherit; font-size: 12px;
+    color: var(--text-2); cursor: pointer; text-align: left; width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .vault-graph #vg-detail li button:hover { color: var(--accent); text-decoration: underline; }
+  .vault-graph #vg-detail .x {
+    position: absolute; right: 8px; top: 7px; background: none; border: 0;
+    color: var(--text-3); font-size: 16px; cursor: pointer; line-height: 1; padding: 2px 5px;
+  }
+  .vault-graph #vg-detail .x:hover { color: var(--text-1); }
+
+  /* github#73 -- geometry only; demoTapAt drives the two rings with transitions, because
+     this file has no keyframes and does not need any for one ripple. */
+  .vault-graph #vg-demotap {
+    position: absolute; left: 0; top: 0; z-index: 49; pointer-events: none;
+  }
+  .vault-graph #vg-demotap[hidden] { display: none; }
+  .vault-graph #vg-demotap span {
+    position: absolute; left: 0; top: 0; display: block;
+    width: 30px; height: 30px; margin: -15px 0 0 -15px;
+    border: 2px solid #fff; border-radius: 50%;
+    opacity: 0; transform: scale(.3);
+  }
+  .vault-graph #vg-demotap span:last-child {
+    border-color: var(--accent); border-width: 3px;
+  }
+  .vault-graph #vg-demotap span.armed { opacity: .95; transform: scale(.3); transition: none; }
+  .vault-graph #vg-demotap span.go {
+    opacity: 0; transform: scale(2.7);
+    transition: transform .45s ease-out, opacity .45s ease-out;
+  }
+
+  .vault-graph #vg-democursor {
+    position: absolute; left: 0; top: 0; z-index: 50; pointer-events: none;
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,.45));
+  }
+  .vault-graph #vg-democursor[hidden] { display: none; }
+  /* github#73 -- a recording at a phone's width shows a finger, not a mouse pointer */
+  .vault-graph #vg-democursor .finger { display: none; }
+
+  .vault-graph .ctxmenu {
+    position: absolute; z-index: 9; width: 176px;
+    background: var(--surface-2); border: 1px solid var(--border-strong);
+    border-radius: 8px; padding: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.22);
+  }
+  .vault-graph .ctxmenu .sws {
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-bottom: 6px;
+  }
+  .vault-graph .ctxmenu .swatch { width: 100%; height: auto; aspect-ratio: 1; }
+  .vault-graph .ctxmenu .auto { width: 100%; }
+
+  /* github#34 */
+  .vault-graph .ctxmenu .vis {
+    width: 100%; margin-top: 6px; display: flex; align-items: center;
+    justify-content: center; gap: 5px;
+  }
+  .vault-graph .ctxmenu .vis svg { width: 14px; height: 14px; flex: none; }
+
+  .vault-graph .scrsub { margin-left: 14px; }
+  .vault-graph .scrsub .scrh .nm { font-size: 10px; }
+  .vault-graph .scrsub .sw {
+    width: 10px; height: 10px; flex: 0 0 auto; margin-right: 1px;
+  }
+  .vault-graph .scrsub .ct {
+    color: var(--text-3); font-variant-numeric: tabular-nums; font-size: 10px;
+    margin: 0 4px;
+  }
+
+  .vault-graph #vg-hits { margin-top: 6px; max-height: 168px; overflow-y: auto; }
+  .vault-graph #vg-hits button {
+    display: block; width: 100%; text-align: left; font: inherit; font-size: 12px;
+    background: none; border: 0; padding: 3px 5px; border-radius: 4px;
+    color: var(--text-2); cursor: pointer;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .vault-graph #vg-hits button:hover { background: var(--surface-2); color: var(--text-1); }
+
+  .vault-graph #vg-busy {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    background: var(--surface-1); z-index: 20; font-size: 13px; color: var(--text-2);
+  }
+
+  /* github#82 -- above the breakpoint the sidebar is a grid column, not a sheet, so folding
+     it means collapsing the column to nothing and handing its width to the stage. The sheet
+     treatment below is the phone's alone; a `display: none` scoped by an attribute outranks
+     every one of those sheet rules on specificity, so this branch has to be a media query or
+     it would kill the sheet at 720px and under. `not all and (max-width: 720px)` rather than
+     `min-width: 721px`: the two branches are then exact complements, and no fractional
+     viewport width can fall into neither. */
+  @media not all and (max-width: 720px) {
+    .vault-graph[data-sheet="off"] { grid-template-columns: 1fr; }
+    /* Not a zero-width clipped column: left in the flow, every control inside it stays
+       focusable while its own toggle reports aria-expanded="false". github#73 fixed exactly
+       that on the phone by making the closed sheet visibility: hidden rather than merely
+       translated away. */
+    .vault-graph[data-sheet="off"] #vg-sidebar { display: none; }
+  }
+
+  /* github#73 -- the disc gets the screen; the legend and the band are summoned */
+  @media (max-width: 720px) {
+    .vault-graph { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+    .vault-graph #vg-sidebar {
+      position: absolute; left: 0; right: 0; bottom: 0; z-index: 8;
+      max-height: 72%; width: auto;
+      border-right: 0; border-top: 1px solid var(--border-strong);
+      border-radius: 12px 12px 0 0;
+      box-shadow: 0 -10px 28px rgb(0 0 0 / .38);
+      transform: translateY(101%); transition: transform .18s ease-out, visibility .18s;
+      visibility: hidden;
+    }
+    .vault-graph[data-sheet="on"] #vg-sidebar { transform: translateY(0); visibility: visible; }
+    /* The sheet stops where the disc starts, so it covers the disc and never the band, and
+       its own heading row is where the floating buttons already are. --vg-canvas-top is
+       published by syncCanvasTop(); the min() keeps it to 72% when the band is away. */
+    .vault-graph[data-sheet="on"] #vg-sidebar {
+      max-height: min(72%, calc(100% - var(--vg-canvas-top, 0px)));
+    }
+    .vault-graph[data-band="on"][data-sheet="on"] .brand { padding-left: 100px; }
+    .vault-graph #vg-heat { display: none; }
+    .vault-graph[data-band="on"] #vg-heat:not([hidden]) { display: flex; }
+    /* With the band hidden, #vg-canvas would inherit the stage's auto row and collapse to
+       nothing: every child of it is absolutely positioned. github#73, design/0013 */
+    .vault-graph #vg-stage { grid-template-rows: 1fr; }
+    .vault-graph[data-band="on"] #vg-stage { grid-template-rows: auto 1fr; }
+    /* The card is a sheet at the foot, not a panel over the disc: 48 linked notes filled the
+       whole screen and the disc was gone. github#73, design/0013 */
+    .vault-graph #vg-detail {
+      left: 12px; right: 12px; width: auto;
+      top: auto; bottom: 12px; max-height: 46%;
+    }
+    /* Both control clusters move to the top corners, clear of that sheet. */
+    .vault-graph #vg-cam { top: var(--controls-inset); bottom: auto; }
+    /* Above the sheet (z-index 8): #vg-mob sits in #vg-canvas, which the band pushes below
+       the sheet's top edge, and a panel that covers its own toggle cannot be closed. The rest
+       of the cluster -- where it sits and which way it runs -- is the base rule's, github#82. */
+    .vault-graph #vg-mob { z-index: 9; }
+    .vault-graph #vg-mob button { opacity: .8; width: 44px; height: 44px; }
+    /* The band's control row is one line of five things and the stage clips it at this
+       width: the second date field and All dates were cut off and unreachable. */
+    .vault-graph #vg-heat .hrow { flex-wrap: wrap; row-gap: 6px; }
+    .vault-graph #vg-heatnote { flex-basis: 100%; order: 3; }
+    .vault-graph #vg-heatscale { margin-left: 0; }
+    .vault-graph #vg-rangebox { order: 4; }
+    .vault-graph #vg-democursor .arrow { display: none; }
+    .vault-graph #vg-democursor .finger { display: block; }
+    /* Solo is opacity 0 until its row is hovered, which on a finger means never.
+       github#73, design/0013 */
+    .vault-graph .lg .only, .vault-graph .lgs .only { opacity: 1; }
+  }
+  @media (max-width: 720px) and (prefers-reduced-motion: reduce) {
+    .vault-graph #vg-sidebar { transition: none; }
+  }

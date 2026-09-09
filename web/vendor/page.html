@@ -1,0 +1,176 @@
+<div id="vg-app" class="vault-graph" data-theme="dark">
+  <aside id="vg-sidebar">
+    <div class="brand">
+      <h1 id="vg-vname">Vault Graph</h1>
+      <button id="vg-gear" class="gear" hidden aria-expanded="false"
+              aria-controls="vg-settings" title="Settings">
+        <span aria-hidden="true">&#9881;</span><span class="sr">Settings</span>
+      </button>
+    </div>
+
+    <div class="block" id="vg-settings" hidden>
+      <!-- github#23 -->
+      <div id="vg-optbody"></div>
+      <div class="row" style="margin-bottom:7px">
+        <div class="lbl" style="margin:0">Folder colours</div>
+        <div class="mini"><button id="vg-fcreset" title="Drop every folder AND subfolder override and go back to the automatic order">Reset</button></div>
+      </div>
+      <div id="vg-setbody"></div>
+      <p class="hint">Twelve slots, handed out in folder order and round again. Setting
+        one folder never moves another, and two folders may share a colour.</p>
+    </div>
+
+    <div class="block">
+    </div>
+
+    <div class="block">
+      <div class="lbl">Search</div>
+      <input type="search" id="vg-q" placeholder="Find a note...">
+      <div id="vg-hits"></div>
+    </div>
+
+    <div class="block">
+      <div class="row" style="margin-bottom:7px">
+        <div class="lbl" style="margin:0">Groups <span id="vg-gcount" class="val"></span></div>
+        <div class="mini"><button id="vg-allon">All</button><button id="vg-alloff">None</button></div>
+      </div>
+      <div id="vg-legend"></div>
+    </div>
+
+    <div class="block">
+      <div class="lbl">View</div>
+      <div class="tools">
+        <button id="vg-refresh" title="Back to the defaults, and replay the intro. Clears highlights and the date range, and returns each folder to the visibility set in the gear -- so archives go back to hidden. This page is a snapshot -- its data was baked in when it was built -- so to pick up notes written since, rebuild it with refresh-graph.ps1 (or build-graph.mjs). The Obsidian plugin rebuilds in place instead.">Refresh</button>
+        <button id="vg-png">Save PNG</button>
+        <button id="vg-dbg" title="Copy the exact layout state, for a bug report">Debug</button>
+      </div>
+    </div>
+
+    <div id="vg-stats"></div>
+  </aside>
+
+  <main id="vg-stage">
+    <div id="vg-heat">
+      <div class="hrow">
+        <div class="lbl">Notes added</div>
+        <span id="vg-heatnote"></span>
+        <div id="vg-heatscale" aria-hidden="true">
+          <span>fewer</span><canvas id="vg-heatkey"></canvas><span>more</span>
+        </div>
+        <button id="vg-compact" type="button" aria-pressed="true"
+                title="Compact the date axis by note count. Off gives every year and month equal width."
+                aria-label="Compact date axis">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+            <path d="M3 4l3 4-3 4M13 4l-3 4 3 4" fill="none" stroke="currentColor"
+                  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <div id="vg-rangebox">
+          <input id="vg-from" class="dt" type="date" aria-label="Range start">
+          <span class="arw" aria-hidden="true">&rarr;</span>
+          <input id="vg-to" class="dt" type="date" aria-label="Range end">
+          <button id="vg-rangeall" class="btn" title="Clear the date range">All dates</button>
+        </div>
+      </div>
+      <div id="vg-heatwrap"><canvas id="vg-heatc"></canvas></div>
+      <canvas id="vg-ribbon"></canvas>
+      <div id="vg-years"></div>
+      <div id="vg-rtip" hidden></div>
+      <div id="vg-htip" hidden></div>
+    </div>
+
+    <div id="vg-canvas">
+      <div id="vg-logo" aria-hidden="true" hidden></div>
+      <div id="vg-logoInner" aria-hidden="true" hidden></div>
+      <div id="vg-graph"></div>
+      <!-- github#12 -->
+      <div id="vg-hubdrop" aria-hidden="true" hidden></div>
+      <!-- github#4 -->
+      <div id="vg-cam" role="group" aria-label="View controls">
+        <button id="vg-zin" type="button" title="Zoom in" aria-label="Zoom in">
+          <svg viewBox="0 0 16 16" width="17" height="17" aria-hidden="true" focusable="false">
+            <path d="M8 3.5v9M3.5 8h9" fill="none" stroke="currentColor" stroke-width="1.6"
+                  stroke-linecap="round"/>
+          </svg>
+        </button>
+        <button id="vg-zout" type="button" title="Zoom out" aria-label="Zoom out">
+          <svg viewBox="0 0 16 16" width="17" height="17" aria-hidden="true" focusable="false">
+            <path d="M3.5 8h9" fill="none" stroke="currentColor" stroke-width="1.6"
+                  stroke-linecap="round"/>
+          </svg>
+        </button>
+        <button id="vg-reset" type="button" title="Fit the disc (or double-click the graph)"
+                aria-label="Fit the disc">
+          <svg viewBox="0 0 16 16" width="17" height="17" aria-hidden="true" focusable="false">
+            <path d="M1.5 5.5V2.5a1 1 0 0 1 1-1h3M14.5 5.5V2.5a1 1 0 0 0-1-1h-3M1.5 10.5v3a1 1 0 0 0 1 1h3M14.5 10.5v3a1 1 0 0 1-1 1h-3"
+                  fill="none" stroke="currentColor" stroke-width="1.5"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="8" cy="8" r="1.6" fill="currentColor"/>
+          </svg>
+        </button>
+        <button id="vg-pan" type="button" aria-pressed="true"
+                title="Drag to pan. Off pins the disc to the centre."
+                aria-label="Drag to pan">
+          <svg viewBox="0 0 16 16" width="17" height="17" aria-hidden="true" focusable="false">
+            <path d="M8 2v12M2 8h12M8 2 6.4 4M8 2l1.6 2M8 14l-1.6-2M8 14l1.6-2M2 8l2-1.6M2 8l2 1.6M14 8l-2-1.6M14 8l-2 1.6"
+                  fill="none" stroke="currentColor" stroke-width="1.4"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+      <div id="vg-tip" hidden></div>
+      <!-- github#73 -->
+      <div id="vg-mob" role="group" aria-label="Panels">
+        <button id="vg-sheet" type="button" aria-expanded="false"
+                title="Folders, search and the view buttons" aria-label="Show the folder list">
+          <svg viewBox="0 0 16 16" width="17" height="17" aria-hidden="true" focusable="false">
+            <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" fill="none" stroke="currentColor"
+                  stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <button id="vg-band" type="button" aria-pressed="false"
+                title="The notes-added calendar and the date strip" aria-label="Show the calendar">
+          <svg viewBox="0 0 16 16" width="17" height="17" aria-hidden="true" focusable="false">
+            <rect x="2.2" y="3.2" width="11.6" height="9.6" rx="1.4" fill="none"
+                  stroke="currentColor" stroke-width="1.4"/>
+            <path d="M2.2 6.4h11.6" fill="none" stroke="currentColor" stroke-width="1.4"/>
+            <rect x="4.4" y="8.2" width="2.2" height="2.2" fill="currentColor"/>
+            <rect x="7.9" y="8.2" width="2.2" height="2.2" fill="currentColor"/>
+          </svg>
+        </button>
+      </div>
+      <div id="vg-detail" hidden></div>
+    </div>
+
+    <div id="vg-busy">Laying out graph...</div>
+  </main>
+
+  <div id="vg-ctxmenu" class="ctxmenu" hidden role="menu"></div>
+
+  <!-- github#73 -- the ring a tap leaves behind, so a finger's press reads on camera -->
+  <div id="vg-demotap" aria-hidden="true" hidden>
+    <span></span>
+    <span></span>
+  </div>
+
+  <div id="vg-democursor" aria-hidden="true" hidden>
+    <svg class="arrow" viewBox="0 0 24 24" width="22" height="22">
+      <path d="M3 2 L3 18.5 L7.2 14.6 L10.6 21.8 L13.3 20.5 L9.9 13.4 L16.5 13.4 Z"
+            fill="#fff" stroke="#000" stroke-width="1.3" stroke-linejoin="round"/>
+    </svg>
+    <!-- github#73 -- a finger, for a recording made at a phone's width. The fingertip sits at
+         the same 3,2 the arrow's point does, so demoCursorAt needs no hotspot of its own. -->
+    <svg class="finger" viewBox="0 0 34 40" width="30" height="36">
+      <path d="M3.4 2.2 C6.2 1.2 8.8 3.2 8.8 6.2 L8.8 20.4 L11.6 20.4
+               C13.2 20.4 14.6 21 15.8 22 L23.4 27.6 C25.6 29.2 26.4 31 26.4 33.4
+               L26.4 36.5 C26.4 38 25.2 39 23.8 39 L11.4 39
+               C9.2 39 7.4 38 6 36.2 L1.9 30.4 C0.9 28.8 0.6 27.4 0.6 25.6
+               L0.6 6.2 C0.6 4.2 1.6 2.8 3.4 2.2 Z"
+            fill="#fff" fill-opacity=".93" stroke="#000" stroke-width="1.5"
+            stroke-linejoin="round"/>
+      <path d="M8.8 20.4 L8.8 26.2 M15.2 23.6 L15.2 27.4 M20.4 26.6 L20.4 29.6"
+            fill="none" stroke="#000" stroke-width="1.1" stroke-linecap="round"
+            stroke-opacity=".55"/>
+    </svg>
+  </div>
+</div>

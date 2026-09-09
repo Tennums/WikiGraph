@@ -1,0 +1,61 @@
+# Wikigraph — the disc, the graph API, and the article reader.
+#
+# Paths default to ./data so a clone runs as-is; on the server point DATA_DIR and
+# ZIM_DIR at the NAS mount instead. Nothing here needs a network beyond your LAN.
+#
+#   cp .env.example .env      # then edit WIKI / ZIM_BOOK
+#   docker compose --profile ingest run --rm ingest   # one-off, hours for enwiki
+#   docker compose up -d
+
+name: wikigraph
+
+services:
+  # The interface plus the subgraph API. Reads the CSR and SQLite the ingest produced;
+  # it never writes, so it is safe to run several against one NAS copy.
+  api:
+    build: { context: ., dockerfile: api/Dockerfile }
+    restart: unless-stopped
+    ports: ["${API_PORT:-3000}:3000"]
+    environment:
+      WIKI: ${WIKI:-simplewiki}
+      GRAPH_DIR: /data/graph
+      WEB_DIR: /web
+      # Where the browser reaches Kiwix -- a URL the *client* can resolve, so a LAN
+      # address rather than the compose service name.
+      KIWIX_URL: ${KIWIX_URL:-http://localhost:8080}
+      KIWIX_BOOK: ${ZIM_BOOK:-}
+      # The renderer re-plans its whole layout every animated frame; upstream measured
+      # 10k nodes at 14 fps. Raising this past ~6000 trades the animation for size.
+      MAX_NODES: ${MAX_NODES:-6000}
+    volumes:
+      - ${DATA_DIR:-./data}/graph:/data/graph:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/info').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # Reading layer. Hot-reloads whatever ZIMs are in the directory, and brings its own
+  # full-text search, so no article content ever goes through the API above.
+  kiwix:
+    image: ghcr.io/kiwix/kiwix-tools:latest
+    restart: unless-stopped
+    command: kiwix-serve --port=8080 --library /zim/library.xml
+    ports: ["${KIWIX_PORT:-8080}:8080"]
+    volumes:
+      - ${ZIM_DIR:-./data/zim}:/zim:ro
+    profiles: ["kiwix"]
+
+  # One-off: dumps in, graph out. Not part of `up`; run it explicitly.
+  #
+  # enwiki is a long job -- the pagelinks dump alone is ~7 GB compressed and holds
+  # ~1.6 billion rows. Give it a disk you do not mind writing a scratch file to and let
+  # it run; it logs each stage as it goes.
+  ingest:
+    build: { context: ., dockerfile: ingest/Dockerfile }
+    command: ["--wiki", "${WIKI:-simplewiki}"]
+    volumes:
+      - ${DATA_DIR:-./data}/dumps:/data/dumps:ro
+      - ${DATA_DIR:-./data}/graph:/data/graph
+    profiles: ["ingest"]

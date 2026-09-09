@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wikigraph</title>
+<link rel="stylesheet" href="vendor/page.css">
+<style>
+  /* The chrome around the disc. page.css is scoped entirely under `.vault-graph`, so
+     it styles nothing out here and the shell has to size itself. */
+  html, body { height: 100%; margin: 0; background: #14161a; color: #e8e8ea;
+               font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { display: flex; flex-direction: column; }
+
+  #bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+         padding: 8px 12px; background: #1b1e24; border-bottom: 1px solid #2c313a; }
+  #bar strong { color: #9fd0ff; letter-spacing: .02em; margin-right: 4px; }
+  #bar label { color: #8b93a1; }
+  select, input, button {
+    font: inherit; background: #23272f; color: #e8e8ea;
+    border: 1px solid #333944; border-radius: 5px; padding: 4px 8px;
+  }
+  input[type=text] { width: 220px; }
+  button { cursor: pointer; }
+  button:hover { background: #2c323c; }
+  #status { margin-left: auto; color: #8b93a1; }
+  #status.err { color: #ff8b8b; }
+
+  #mount { flex: 1; min-height: 0; position: relative; }
+  #mount > .vault-graph { height: 100%; }
+
+  /* Injected into the detail card; matched to the card's own type scale. */
+  .wg-read { display: inline-block; margin-top: 8px; padding: 4px 10px;
+             background: #2b6cb0; color: #fff !important; border-radius: 4px;
+             text-decoration: none; font-weight: 600; }
+  .wg-read:hover { background: #3182ce; }
+</style>
+</head>
+<body>
+
+<div id="bar">
+  <strong>Wikigraph</strong>
+
+  <label for="view">View</label>
+  <select id="view">
+    <option value="top">Best connected</option>
+    <option value="neighborhood" selected>Around an article</option>
+    <option value="category">Category tree</option>
+  </select>
+
+  <input type="text" id="q" list="hits" placeholder="Physics" value="Physics">
+  <datalist id="hits"></datalist>
+
+  <label for="limit">Nodes</label>
+  <select id="limit">
+    <option>1000</option><option selected>2500</option>
+    <option>4000</option><option>6000</option>
+  </select>
+
+  <label for="hops" id="hopsLabel">Hops</label>
+  <select id="hops"><option>1</option><option selected>2</option><option>3</option></select>
+
+  <button id="go">Draw</button>
+  <span id="status">loading…</span>
+</div>
+
+<div id="mount"></div>
+
+<script src="vendor/engine.js"></script>
+<script type="module">
+import { mountVaultGraph } from "./vendor/page.js";
+
+const $ = (id) => document.getElementById(id);
+const status = (msg, err = false) => {
+  $("status").textContent = msg;
+  $("status").classList.toggle("err", err);
+};
+
+let info = {};
+try {
+  info = await (await fetch("api/info")).json();
+} catch {
+  status("API unreachable", true);
+}
+
+// The markup lives in the vendored page.html exactly as upstream ships it, so pulling
+// it in at runtime keeps this shell free of a build step and the vendor tree free of
+// our edits.
+const markup = await (await fetch("vendor/page.html")).text();
+
+let teardown = null;
+
+async function draw() {
+  const view = $("view").value;
+  const q = $("q").value.trim();
+  const limit = $("limit").value;
+
+  const url =
+    view === "top" ? `api/view/top?limit=${limit}`
+    : view === "category" ? `api/view/category?title=${encodeURIComponent(q)}&limit=${limit}&depth=3`
+    : `api/view/neighborhood?title=${encodeURIComponent(q)}&limit=${limit}&hops=${$("hops").value}`;
+
+  status("querying…");
+  const t0 = performance.now();
+  let data;
+  try {
+    const res = await fetch(url);
+    data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? res.statusText);
+  } catch (e) {
+    status(e.message, true);
+    return;
+  }
+  const queried = Math.round(performance.now() - t0);
+
+  // mountVaultGraph builds its whole scene from the element it is given, so a fresh
+  // one per view is the honest way to swap datasets -- reusing the node would leave
+  // the previous disc's locks (band, geometry, normalisation box) in place, and those
+  // are deliberately derived once at load.
+  if (teardown) teardown();
+  $("mount").innerHTML = markup;
+
+  const t1 = performance.now();
+  mountVaultGraph($("mount").querySelector("#vg-app"), data, {
+    Graph: window.VaultGraphEngine.GraphStore,
+    Renderer: window.VaultGraphEngine.Renderer,
+    settingsUI: false,
+  });
+  const drawn = Math.round(performance.now() - t1);
+
+  status(`${data.nodes.length.toLocaleString()} articles · ` +
+         `${data.edges.length.toLocaleString()} links · ${queried}ms query · ${drawn}ms draw`);
+
+  teardown = watchDetail();
+}
+
+/**
+ * Point the detail card's open button at Kiwix.
+ *
+ * The card already has exactly the right button; upstream hardcodes it to
+ * `obsidian://open?vault=…`, which is the only place the Obsidian assumption reaches
+ * into the render layer. Rewriting the anchor the card just drew keeps `vendor/` a
+ * verbatim copy of upstream -- so it can be re-vendored from a new release without
+ * replaying a patch -- and inherits the card's own styling and placement for free.
+ *
+ * With no ZIM configured the button is removed rather than left pointing at a handler
+ * this machine does not have.
+ */
+function watchDetail() {
+  const card = $("mount").querySelector("#vg-detail");
+  if (!card) return null;
+
+  const retarget = () => {
+    const a = card.querySelector("a.open");
+    if (!a || a.dataset.wg) return;
+    a.dataset.wg = "1";
+    if (!info.reader) { a.remove(); return; }
+    const title = card.querySelector("h2, h3, .title")?.textContent?.trim();
+    if (!title) return;
+    a.href = `${info.reader}/A/${encodeURIComponent(title.replace(/ /g, "_"))}`;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = "Read the article →";
+  };
+
+  const obs = new MutationObserver(retarget);
+  obs.observe(card, { childList: true, subtree: true });
+  retarget();
+  return () => obs.disconnect();
+}
+
+// Typeahead straight off the title index.
+let searchTimer;
+$("q").addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(async () => {
+    const v = $("q").value.trim();
+    if (v.length < 2 || $("view").value === "category") return;
+    const hits = await (await fetch(`api/search?q=${encodeURIComponent(v)}`)).json();
+    $("hits").innerHTML = hits
+      .map((h) => `<option value="${h.title.replace(/_/g, " ")}">`).join("");
+  }, 180);
+});
+
+const syncControls = () => {
+  const view = $("view").value;
+  $("q").disabled = view === "top";
+  const nbhd = view === "neighborhood";
+  $("hops").hidden = $("hopsLabel").hidden = !nbhd;
+  $("q").placeholder = view === "category" ? "Physics (category name)" : "Physics";
+};
+$("view").addEventListener("change", syncControls);
+$("go").addEventListener("click", draw);
+$("q").addEventListener("keydown", (e) => { if (e.key === "Enter") draw(); });
+
+syncControls();
+draw();
+</script>
+</body>
+</html>
