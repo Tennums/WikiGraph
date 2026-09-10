@@ -7,11 +7,15 @@
 #   docker compose --profile ingest run --rm ingest   # one-off, hours for enwiki
 #   docker compose up -d
 #
-# Ingress is Caddy's, over the shared external `proxy` network. Both web-facing
-# services carry an explicit container_name: on a shared network the compose service
-# alias is just `api`, which any other stack on that network can also claim, and
-# whichever container Caddy resolves first wins. The explicit name is what makes the
-# Caddyfile target unambiguous.
+# Ingress is Caddy's, over the shared external `proxy` network, on one hostname:
+#
+#     https://wikigraph.docker.home.arpa/         the disc
+#     https://wikigraph.docker.home.arpa/kiwix/   the articles
+#
+# Both web-facing services carry an explicit container_name. On a shared network the
+# compose service alias is just `api`, which any other stack on that network can also
+# claim, and whichever container Caddy resolves first wins; the explicit name is what
+# makes the Caddyfile target unambiguous. See README for the Caddyfile block.
 
 name: wikigraph
 
@@ -20,19 +24,19 @@ services:
   # it never writes, so it is safe to run several against one NAS copy.
   api:
     build: { context: ., dockerfile: api/Dockerfile }
-    container_name: wikigraph-api
+    container_name: wikigraph
     restart: unless-stopped
-    # Only needed to reach the API without going through Caddy — drop this once the
-    # reverse proxy fronts it, and the API is no longer exposed on the host at all.
-    ports: ["${API_PORT:-3000}:3000"]
+    # Caddy reaches this over the proxy network, so nothing is published on the host.
+    # Uncomment to bypass the proxy while debugging.
+    # ports: ["${API_PORT:-3000}:3000"]
     environment:
       WIKI: ${WIKI:-simplewiki}
       GRAPH_DIR: /data/graph
       WEB_DIR: /web
-      # Where the *browser* reaches Kiwix. Behind Caddy this is the public hostname,
-      # not a compose service name and not localhost: the link is followed by the
-      # reader's machine, which cannot resolve either.
-      KIWIX_URL: ${KIWIX_URL:-http://localhost:8080}
+      # Where the *browser* reaches Kiwix — the hostname and prefix, since the link is
+      # followed by the reader's machine, which can resolve neither the compose service
+      # name nor localhost. Must match kiwix-serve's -r below.
+      KIWIX_URL: ${KIWIX_URL:-https://wikigraph.docker.home.arpa/kiwix}
       KIWIX_BOOK: ${ZIM_BOOK:-}
       # The renderer re-plans its whole layout every animated frame; upstream measured
       # 10k nodes at 14 fps. Raising this past ~6000 trades the animation for size.
@@ -54,8 +58,13 @@ services:
     image: ghcr.io/kiwix/kiwix-tools:latest
     container_name: wikigraph-kiwix
     restart: unless-stopped
-    command: kiwix-serve --port=8080 --library /zim/library.xml
-    ports: ["${KIWIX_PORT:-8080}:8080"]
+    # -r tells kiwix-serve the prefix it is mounted under, so every link and asset it
+    # generates is written /kiwix/... . Caddy passes the prefix through untouched
+    # rather than stripping it; strip it and kiwix's own absolute URLs break on the
+    # first click.
+    command: kiwix-serve --port=8080 --urlRootLocation /kiwix --library /zim/library.xml
+    # As above: Caddy fronts this. Uncomment only to bypass it.
+    # ports: ["${KIWIX_PORT:-8080}:8080"]
     volumes:
       - ${ZIM_DIR:-/media/vault/WikiGraph/zim}:/zim:ro
     networks:

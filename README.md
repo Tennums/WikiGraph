@@ -82,30 +82,38 @@ download. Each file is verified with `gzip -t` before it counts as fetched.
 
 ### Behind Caddy
 
-Both web-facing services join the external `proxy` network and carry an explicit
-`container_name`, because on a shared network the compose alias is just `api` — which any
-other stack on that network can also claim.
+LAN only, one hostname, two services split by path:
 
 ```caddyfile
-graph.example.com {
-    reverse_proxy wikigraph-api:3000
-}
+wikigraph.docker.home.arpa {
+    import internal_tls
 
-wiki.example.com {
-    reverse_proxy wikigraph-kiwix:8080
+    handle /kiwix* {
+        reverse_proxy wikigraph-kiwix:8080
+    }
+
+    handle {
+        reverse_proxy wikigraph:3000
+    }
 }
 ```
 
-The `ports:` lines in `docker-compose.yml` are only there to reach the services without
-going through Caddy; comment them out once the proxy fronts both, and nothing is exposed
-on the host.
+`handle`, **not** `handle_path`. `kiwix-serve` is started with `-r /kiwix`, so it knows
+its own prefix and writes every link and asset as `/kiwix/…`; it therefore expects that
+prefix on the way in too. `handle_path` strips it, and Kiwix's own absolute URLs then
+break on the first click.
 
-`KIWIX_URL` must then be the **public hostname** (`https://wiki.example.com`). It is
-followed by the reader's browser, which can resolve neither `wikigraph-kiwix` nor
-`localhost`.
+Both web-facing services join the external `proxy` network and carry an explicit
+`container_name`, because on a shared network the compose alias is just `api` — which any
+other stack on that network can also claim. Nothing is published on the host: the `ports:`
+lines are commented out, to be re-enabled only to bypass the proxy while debugging.
 
-The ingest runs with `network_mode: none` — it serves nothing and only moves files
-between two NAS directories.
+The ingest runs with `network_mode: none` — it serves nothing and only moves files between
+two NAS directories.
+
+Two settings have to agree, and there is nothing to catch it if they drift: `KIWIX_URL`
+(what the API writes into article links) and `kiwix-serve -r` (what Kiwix answers on). Both
+say `/kiwix` out of the box.
 
 ### The reading layer
 
@@ -118,8 +126,10 @@ docker run --rm -v /media/vault/WikiGraph/zim:/zim ghcr.io/kiwix/kiwix-tools:lat
 docker compose --profile kiwix up -d
 ```
 
-Set `ZIM_BOOK` to the filename without its extension — that is the book name
-`kiwix-serve` puts in the URL, and the API builds article links from it.
+Set `ZIM_BOOK` to the book name `kiwix-serve` derives from the file: its filename,
+**lowercased**, without the extension, spaces turned into underscores. The API builds
+article links as `<KIWIX_URL>/content/<ZIM_BOOK>/A/<Article_Title>`, so a wrong book name
+shows as every article 404ing while the disc itself works.
 
 | ZIM | Size |
 |---|---|
