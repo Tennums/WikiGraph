@@ -1,11 +1,17 @@
 # Wikigraph — the disc, the graph API, and the article reader.
 #
-# Paths default to ./data so a clone runs as-is; on the server point DATA_DIR and
-# ZIM_DIR at the NAS mount instead. Nothing here needs a network beyond your LAN.
+# All state lives on the NAS under DATA_DIR; the containers hold nothing of their own,
+# so they can be rebuilt or moved without touching the graph.
 #
-#   cp .env.example .env      # then edit WIKI / ZIM_BOOK
+#   cp .env.example .env      # then set WIKI / ZIM_BOOK / KIWIX_URL
 #   docker compose --profile ingest run --rm ingest   # one-off, hours for enwiki
 #   docker compose up -d
+#
+# Ingress is Caddy's, over the shared external `proxy` network. Both web-facing
+# services carry an explicit container_name: on a shared network the compose service
+# alias is just `api`, which any other stack on that network can also claim, and
+# whichever container Caddy resolves first wins. The explicit name is what makes the
+# Caddyfile target unambiguous.
 
 name: wikigraph
 
@@ -14,21 +20,27 @@ services:
   # it never writes, so it is safe to run several against one NAS copy.
   api:
     build: { context: ., dockerfile: api/Dockerfile }
+    container_name: wikigraph-api
     restart: unless-stopped
+    # Only needed to reach the API without going through Caddy — drop this once the
+    # reverse proxy fronts it, and the API is no longer exposed on the host at all.
     ports: ["${API_PORT:-3000}:3000"]
     environment:
       WIKI: ${WIKI:-simplewiki}
       GRAPH_DIR: /data/graph
       WEB_DIR: /web
-      # Where the browser reaches Kiwix -- a URL the *client* can resolve, so a LAN
-      # address rather than the compose service name.
+      # Where the *browser* reaches Kiwix. Behind Caddy this is the public hostname,
+      # not a compose service name and not localhost: the link is followed by the
+      # reader's machine, which cannot resolve either.
       KIWIX_URL: ${KIWIX_URL:-http://localhost:8080}
       KIWIX_BOOK: ${ZIM_BOOK:-}
       # The renderer re-plans its whole layout every animated frame; upstream measured
       # 10k nodes at 14 fps. Raising this past ~6000 trades the animation for size.
       MAX_NODES: ${MAX_NODES:-6000}
     volumes:
-      - ${DATA_DIR:-./data}/graph:/data/graph:ro
+      - ${DATA_DIR:-/media/vault/WikiGraph}/graph:/data/graph:ro
+    networks:
+      - proxy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/info').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
@@ -40,22 +52,34 @@ services:
   # full-text search, so no article content ever goes through the API above.
   kiwix:
     image: ghcr.io/kiwix/kiwix-tools:latest
+    container_name: wikigraph-kiwix
     restart: unless-stopped
     command: kiwix-serve --port=8080 --library /zim/library.xml
     ports: ["${KIWIX_PORT:-8080}:8080"]
     volumes:
-      - ${ZIM_DIR:-./data/zim}:/zim:ro
+      - ${ZIM_DIR:-/media/vault/WikiGraph/zim}:/zim:ro
+    networks:
+      - proxy
     profiles: ["kiwix"]
 
   # One-off: dumps in, graph out. Not part of `up`; run it explicitly.
   #
-  # enwiki is a long job -- the pagelinks dump alone is ~7 GB compressed and holds
-  # ~1.6 billion rows. Give it a disk you do not mind writing a scratch file to and let
-  # it run; it logs each stage as it goes.
+  # Deliberately off the proxy network — it serves nothing and never needs to be
+  # reachable. It only reads the dumps and writes the graph, both on the NAS.
+  #
+  # enwiki is a long job: the pagelinks dump alone is ~7 GB compressed and holds ~1.6
+  # billion rows. Expect one to two hours and 12–16 GB of RAM, and note it writes a
+  # scratch file beside the output that is roughly the size of the finished CSR.
   ingest:
     build: { context: ., dockerfile: ingest/Dockerfile }
+    container_name: wikigraph-ingest
     command: ["--wiki", "${WIKI:-simplewiki}"]
     volumes:
-      - ${DATA_DIR:-./data}/dumps:/data/dumps:ro
-      - ${DATA_DIR:-./data}/graph:/data/graph
+      - ${DATA_DIR:-/media/vault/WikiGraph}/dumps:/data/dumps:ro
+      - ${DATA_DIR:-/media/vault/WikiGraph}/graph:/data/graph
+    network_mode: none
     profiles: ["ingest"]
+
+networks:
+  proxy:
+    external: true

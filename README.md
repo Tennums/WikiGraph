@@ -59,32 +59,67 @@ at enwiki scale.
 
 ## Running it
 
-Needs Docker, and dumps for the wiki you want.
+All state lives on the NAS under `DATA_DIR`; the containers hold nothing of their own.
+
+```
+/media/vault/WikiGraph/
+├── dumps/     enwiki-latest-*.sql.gz     (input, mounted read-only)
+├── graph/     enwiki.csr, enwiki.db      (built once, then read-only)
+└── zim/       *.zim + library.xml        (Kiwix)
+```
 
 ```bash
-cp .env.example .env          # set WIKI, and ZIM_BOOK if you have a ZIM
-./fetch-dumps.sh simplewiki   # ~190 MB; enwiki is ~14 GB
+cp .env.example .env          # set WIKI, ZIM_BOOK, KIWIX_URL
 docker compose --profile ingest run --rm ingest
 docker compose up -d
 ```
 
-Then open <http://localhost:3000>.
+If you still need the dumps, `./fetch-dumps.sh enwiki /media/vault/WikiGraph/dumps`
+fetches all six. It downloads **sequentially on purpose** — `dumps.wikimedia.org` answers
+parallel requests from one address with 429, and a 429 lands as a 169-byte HTML error page
+wearing a `.sql.gz` name, which then fails deep inside the parser instead of at the
+download. Each file is verified with `gzip -t` before it counts as fetched.
 
-Fetching is **sequential on purpose** — `dumps.wikimedia.org` answers parallel requests
-from one address with 429, and a 429 lands as a 169-byte HTML error page wearing a
-`.sql.gz` name, which then fails deep inside the parser instead of at the download.
+### Behind Caddy
 
-### Adding the reading layer
+Both web-facing services join the external `proxy` network and carry an explicit
+`container_name`, because on a shared network the compose alias is just `api` — which any
+other stack on that network can also claim.
+
+```caddyfile
+graph.example.com {
+    reverse_proxy wikigraph-api:3000
+}
+
+wiki.example.com {
+    reverse_proxy wikigraph-kiwix:8080
+}
+```
+
+The `ports:` lines in `docker-compose.yml` are only there to reach the services without
+going through Caddy; comment them out once the proxy fronts both, and nothing is exposed
+on the host.
+
+`KIWIX_URL` must then be the **public hostname** (`https://wiki.example.com`). It is
+followed by the reader's browser, which can resolve neither `wikigraph-kiwix` nor
+`localhost`.
+
+The ingest runs with `network_mode: none` — it serves nothing and only moves files
+between two NAS directories.
+
+### The reading layer
 
 Download a ZIM from [the Kiwix library](https://download.kiwix.org/zim/wikipedia/) into
-`data/zim/`, set `ZIM_BOOK` to its filename without the extension, and start the profile:
+`/media/vault/WikiGraph/zim/`, build its library index, then start the profile:
 
 ```bash
+docker run --rm -v /media/vault/WikiGraph/zim:/zim ghcr.io/kiwix/kiwix-tools:latest \
+  kiwix-manage /zim/library.xml add /zim/wikipedia_en_all_maxi_2026-08.zim
 docker compose --profile kiwix up -d
 ```
 
-`KIWIX_URL` must be reachable **by the browser**, so use the server's LAN address rather
-than a compose service name.
+Set `ZIM_BOOK` to the filename without its extension — that is the book name
+`kiwix-serve` puts in the URL, and the API builds article links from it.
 
 | ZIM | Size |
 |---|---|

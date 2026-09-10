@@ -58,11 +58,36 @@ def log(msg: str) -> None:
 
 
 def dump(wiki: str, table: str, d: Path) -> str:
+    """Locate one dump, or fail with enough detail to fix it in one go.
+
+    The usual cause of a miss is a dated filename: the dumps are also published as
+    `<wiki>-20260901-<table>.sql.gz`, and only the `latest/` directory uses the name
+    this expects. So the error lists what is actually there -- a naming mismatch is
+    obvious at a glance, where a bare "not found" sends you looking for a missing
+    download that is sitting right next to it.
+    """
     p = d / f"{wiki}-latest-{table}.sql.gz"
-    if not p.exists():
-        sys.exit(f"missing dump: {p}\n  fetch it from "
-                 f"https://dumps.wikimedia.org/{wiki}/latest/")
-    return str(p)
+    if p.exists():
+        return str(p)
+
+    # Accept a dated dump if exactly one matches: it is the same file, and refusing it
+    # over its name helps nobody.
+    dated = sorted(d.glob(f"{wiki}-*-{table}.sql.gz"))
+    if len(dated) == 1:
+        log(f"  using {dated[0].name}")
+        return str(dated[0])
+    if len(dated) > 1:
+        sys.exit(f"several dumps match {wiki}-*-{table}.sql.gz:\n  " +
+                 "\n  ".join(x.name for x in dated) +
+                 f"\n  keep one, or rename it to {p.name}")
+
+    have = sorted(x.name for x in d.glob("*.sql.gz")) if d.is_dir() else []
+    sys.exit(
+        f"missing dump: {p}\n"
+        f"  fetch it from https://dumps.wikimedia.org/{wiki}/latest/\n"
+        + (f"  {d} holds: " + ", ".join(have) if have
+           else f"  {d} holds no .sql.gz files at all")
+    )
 
 
 def main() -> None:
