@@ -28,6 +28,16 @@ Redirects are resolved here, once
 Roughly a third of enwiki's links point at a redirect. Left alone they show up as
 millions of degree-1 stubs and the disc turns to fluff, so every link is followed to
 the article it really means before it ever reaches the graph.
+
+Why the SQLite file is built on local disk and moved afterwards
+--------------------------------------------------------------
+SQLite coordinates through POSIX advisory locks, which network filesystems implement
+partially (NFS) or not usefully (SMB/CIFS). Creating the database straight onto a NAS
+mount fails with "database is locked" on a brand-new file with no other process in
+sight. The CSR is unaffected because plain sequential writes need no locking -- which
+is exactly why the failure lands two hours in, after the expensive half has succeeded.
+Building locally is also far quicker: enwiki inserts ~100M category rows and builds
+nine indexes, and doing that over a network mount is glacial even where it works.
 """
 
 from __future__ import annotations
@@ -35,8 +45,10 @@ from __future__ import annotations
 import argparse
 import array
 import os
+import shutil
 import sqlite3
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -95,6 +107,13 @@ def main() -> None:
     ap.add_argument("--wiki", default="simplewiki", help="e.g. simplewiki, enwiki")
     ap.add_argument("--dumps", default="data/dumps", type=Path)
     ap.add_argument("--out", default="data/graph", type=Path)
+    ap.add_argument("--tmpdir", default=os.environ.get("WIKIGRAPH_TMPDIR") or None,
+                    type=Path,
+                    help="local scratch for the edge file and the SQLite build "
+                         "(default: system temp). Must NOT be on a network mount.")
+    ap.add_argument("--meta-only", action="store_true",
+                    help="reuse the existing .csr and rebuild only the .db -- skips "
+                         "the pagelinks pass, which is over half the run")
     ap.add_argument("--topic-root", default="",
                     help="category whose children become the wedges "
                          "(default: Main_topic_classifications, then Articles)")
@@ -104,6 +123,33 @@ def main() -> None:
                     help="drop articles shorter than this many bytes (stub filter)")
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
+
+    tmp = args.tmpdir or Path(tempfile.gettempdir())
+    if tmp.exists() and not tmp.is_dir():
+        sys.exit(f"--tmpdir {tmp} exists but is not a directory")
+    tmp.mkdir(parents=True, exist_ok=True)
+    free = shutil.disk_usage(tmp).free
+    log(f"scratch: {tmp} ({free / 1e9:.0f} GB free)")
+    # enwiki wants ~6 GB for the edge file and ~8 GB for the database. Checking now
+    # rather than discovering it at minute 90 is the difference between a two-second
+    # failure and a two-hour one.
+    if free < 5e9:
+        sys.exit(f"only {free / 1e9:.1f} GB free on {tmp}; pass --tmpdir somewhere "
+                 f"with room (enwiki needs ~15 GB of scratch)")
+    if free < 25e9:
+        log(f"  WARNING: enwiki wants ~15 GB here; {free / 1e9:.0f} GB may be tight")
+
+    # Validate --meta-only's input before reading a single dump. The article-count
+    # check needs `n` and so has to wait, but a missing or corrupt CSR can be caught
+    # now -- otherwise enwiki spends half an hour parsing linktarget only to find
+    # there was nothing to reuse.
+    if args.meta_only:
+        probe = args.out / f"{args.wiki}.csr"
+        if not probe.exists():
+            sys.exit(f"--meta-only needs an existing {probe}")
+        if int(np.fromfile(probe, dtype=np.int64, count=1)[0]) != 0x57474B31:
+            sys.exit(f"{probe} is not a wikigraph CSR (bad magic)")
+        log(f"  --meta-only: will reuse {probe}")
 
     # ---------------------------------------------------------------- 1. pages
     # One pass over `page` gives every id space we need. Redirects are kept: links
@@ -196,83 +242,101 @@ def main() -> None:
     # Two passes. The first resolves every link and banks the pairs in a scratch file
     # while counting each source's degree; the second places them. Reading the scratch
     # file back is far cheaper than decompressing the dump twice.
-    log("reading pagelinks ...")
-    deg = np.zeros(n + 1, dtype=np.int64)
-    scratch = args.out / f"{args.wiki}.edges.tmp"
-    kept = seen = 0
-    with open(scratch, "wb") as fh:
-        buf = array.array("i")
-        for pl_from, from_ns, lt_id in dp.pagelinks(dump(args.wiki, "pagelinks", args.dumps)):
-            seen += 1
-            if from_ns != NS_ARTICLE or pl_from > max_pid or lt_id > max_lt:
-                continue
-            s = pid2idx[pl_from]
-            t = lt2idx[lt_id]
-            # A link from or to a non-article, and an article's link to itself (which
-            # a redirect collapse can easily create), carry no structure.
-            if s < 0 or t < 0 or s == t:
-                continue
-            buf.append(int(s)); buf.append(int(t))
-            deg[s] += 1
-            kept += 1
-            if len(buf) >= 1 << 22:
-                buf.tofile(fh); buf = array.array("i")
-        buf.tofile(fh)
-    log(f"  {seen:,} rows -> {kept:,} article links")
-    del lt2idx
-
-    # Prefix sum gives each source its slice of the target array.
-    offsets = np.zeros(n + 1, dtype=np.int64)
-    np.cumsum(deg[:n], out=offsets[1:])
-    targets = np.empty(kept, dtype=np.int32)
-    cursor = offsets[:n].copy()
-
-    log("building CSR ...")
-    with open(scratch, "rb") as fh:
-        while True:
-            block = np.fromfile(fh, dtype=np.int32, count=1 << 22)
-            if block.size == 0:
-                break
-            src, dst = block[0::2], block[1::2]
-            # A source usually appears many times inside one block, so its slot has to
-            # advance *within* the block too -- reading the cursor once per edge would
-            # hand every link from one article the same slot. Grouping the block by
-            # source makes that rank a counted offset from each group's start.
-            order = np.argsort(src, kind="stable")
-            s_sorted = src[order]
-            starts = np.r_[0, np.flatnonzero(np.diff(s_sorted)) + 1]
-            group_len = np.diff(np.r_[starts, s_sorted.size])
-            rank = np.arange(s_sorted.size) - np.repeat(starts, group_len)
-            targets[cursor[s_sorted] + rank] = dst[order]
-            cursor += np.bincount(src, minlength=n)
-    os.unlink(scratch)
-
-    # Redirect collapsing can make two links from one article point at the same
-    # target. Sorting each slice makes the duplicates adjacent, and a sorted slice is
-    # what lets the API intersect neighbour lists cheaply later.
-    log("deduplicating ...")
-    out_off = np.zeros(n + 1, dtype=np.int64)
-    write = 0
-    for i in range(n):
-        a, b = offsets[i], offsets[i + 1]
-        if b > a:
-            uniq = np.unique(targets[a:b])
-            targets[write:write + uniq.size] = uniq
-            write += uniq.size
-        out_off[i + 1] = write
-    targets = targets[:write]
-    offsets = out_off
-    log(f"  {write:,} unique links ({kept - write:,} duplicates removed)")
-
-    # ----------------------------------------------------------- 5. write the CSR
     csr = args.out / f"{args.wiki}.csr"
-    with open(csr, "wb") as fh:
-        # A tiny header so the API can validate what it mapped instead of trusting
-        # the filename.
-        np.array([0x57474B31, 1, n, write], dtype=np.int64).tofile(fh)  # "WGK1"
-        offsets.astype(np.int64).tofile(fh)
-        targets.astype(np.int32).tofile(fh)
-    log(f"wrote {csr} ({csr.stat().st_size / 1e9:.2f} GB)")
+
+    if args.meta_only:
+        # The CSR is the expensive half and it is already on disk. Read back just the
+        # header and offsets: everything downstream needs `offsets` (for per-article
+        # degree) and the edge count, nothing else.
+        if not csr.exists():
+            sys.exit(f"--meta-only needs an existing {csr}")
+        head = np.fromfile(csr, dtype=np.int64, count=4)
+        if int(head[0]) != 0x57474B31:
+            sys.exit(f"{csr} is not a wikigraph CSR (bad magic)")
+        csr_n, write = int(head[2]), int(head[3])
+        if csr_n != n:
+            sys.exit(f"{csr} holds {csr_n:,} articles but the page dump gives "
+                     f"{n:,} -- the dumps changed, so rebuild without --meta-only")
+        offsets = np.fromfile(csr, dtype=np.int64, count=n + 1, offset=32)
+        log(f"reusing {csr}: {n:,} articles, {write:,} links")
+    else:
+        deg = np.zeros(n + 1, dtype=np.int64)
+        # Local, not next to the output: this file is written once and read back once,
+        # and pushing ~6 GB across a network mount twice is pure waste.
+        scratch = tmp / f"{args.wiki}.edges.tmp"
+        kept = seen = 0
+        with open(scratch, "wb") as fh:
+            buf = array.array("i")
+            for pl_from, from_ns, lt_id in dp.pagelinks(dump(args.wiki, "pagelinks", args.dumps)):
+                seen += 1
+                if from_ns != NS_ARTICLE or pl_from > max_pid or lt_id > max_lt:
+                    continue
+                s = pid2idx[pl_from]
+                t = lt2idx[lt_id]
+                # A link from or to a non-article, and an article's link to itself (which
+                # a redirect collapse can easily create), carry no structure.
+                if s < 0 or t < 0 or s == t:
+                    continue
+                buf.append(int(s)); buf.append(int(t))
+                deg[s] += 1
+                kept += 1
+                if len(buf) >= 1 << 22:
+                    buf.tofile(fh); buf = array.array("i")
+            buf.tofile(fh)
+        log(f"  {seen:,} rows -> {kept:,} article links")
+        del lt2idx
+
+        # Prefix sum gives each source its slice of the target array.
+        offsets = np.zeros(n + 1, dtype=np.int64)
+        np.cumsum(deg[:n], out=offsets[1:])
+        targets = np.empty(kept, dtype=np.int32)
+        cursor = offsets[:n].copy()
+
+        log("building CSR ...")
+        with open(scratch, "rb") as fh:
+            while True:
+                block = np.fromfile(fh, dtype=np.int32, count=1 << 22)
+                if block.size == 0:
+                    break
+                src, dst = block[0::2], block[1::2]
+                # A source usually appears many times inside one block, so its slot has to
+                # advance *within* the block too -- reading the cursor once per edge would
+                # hand every link from one article the same slot. Grouping the block by
+                # source makes that rank a counted offset from each group's start.
+                order = np.argsort(src, kind="stable")
+                s_sorted = src[order]
+                starts = np.r_[0, np.flatnonzero(np.diff(s_sorted)) + 1]
+                group_len = np.diff(np.r_[starts, s_sorted.size])
+                rank = np.arange(s_sorted.size) - np.repeat(starts, group_len)
+                targets[cursor[s_sorted] + rank] = dst[order]
+                cursor += np.bincount(src, minlength=n)
+        os.unlink(scratch)
+
+        # Redirect collapsing can make two links from one article point at the same
+        # target. Sorting each slice makes the duplicates adjacent, and a sorted slice is
+        # what lets the API intersect neighbour lists cheaply later.
+        log("deduplicating ...")
+        out_off = np.zeros(n + 1, dtype=np.int64)
+        write = 0
+        for i in range(n):
+            a, b = offsets[i], offsets[i + 1]
+            if b > a:
+                uniq = np.unique(targets[a:b])
+                targets[write:write + uniq.size] = uniq
+                write += uniq.size
+            out_off[i + 1] = write
+        targets = targets[:write]
+        offsets = out_off
+        log(f"  {write:,} unique links ({kept - write:,} duplicates removed)")
+
+        # ----------------------------------------------------------- 5. write the CSR
+        with open(csr, "wb") as fh:
+            # A tiny header so the API can validate what it mapped instead of trusting
+            # the filename.
+            np.array([0x57474B31, 1, n, write], dtype=np.int64).tofile(fh)  # "WGK1"
+            offsets.astype(np.int64).tofile(fh)
+            targets.astype(np.int32).tofile(fh)
+        log(f"wrote {csr} ({csr.stat().st_size / 1e9:.2f} GB)")
 
     # ------------------------------------------------------------ 6. categories
     log("reading categorylinks ...")
@@ -371,10 +435,17 @@ def main() -> None:
 
     # --------------------------------------------------------------- 8. metadata
     db = args.out / f"{args.wiki}.db"
-    if db.exists():
-        os.unlink(db)
-    log(f"writing {db} ...")
-    con = sqlite3.connect(db)
+    staged = tmp / f"{args.wiki}.db.building"
+
+    # Build locally, move at the end. SQLite needs POSIX advisory locks that network
+    # filesystems do not reliably provide, so creating this straight on the NAS fails
+    # with "database is locked" on a file nothing else has open. Sidecars go too: a
+    # journal left by a crashed run is read back as state and locks the new database.
+    for stale in (staged, Path(str(staged) + "-journal"), Path(str(staged) + "-wal"),
+                  Path(str(staged) + "-shm")):
+        stale.unlink(missing_ok=True)
+    log(f"writing {staged} ...")
+    con = sqlite3.connect(staged)
     con.executescript("""
         PRAGMA journal_mode = OFF;
         PRAGMA synchronous  = OFF;
@@ -413,6 +484,13 @@ def main() -> None:
     """)
     con.commit()
     con.close()
+
+    # shutil.move falls back to copy+delete across filesystems, which is what this is.
+    # The destination is removed first: overwriting in place would leave a half-written
+    # database readable by a running API if the copy is interrupted.
+    log(f"moving {staged.stat().st_size / 1e9:.2f} GB to {db} ...")
+    db.unlink(missing_ok=True)
+    shutil.move(str(staged), str(db))
     log(f"done: {n:,} nodes, {write:,} edges, {db.stat().st_size / 1e6:.0f} MB metadata")
 
 

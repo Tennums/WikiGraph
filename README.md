@@ -74,6 +74,23 @@ docker compose --profile ingest run --rm ingest
 docker compose up -d
 ```
 
+The ingest needs ~15 GB of **local** scratch (`SCRATCH_DIR`, a named volume by default).
+It must not point at the NAS: SQLite coordinates through POSIX advisory locks that
+network filesystems do not reliably provide, so building the database on the share fails
+with `database is locked` on a file nothing else has open — and it fails at the very end,
+after the expensive half has already succeeded. The database is built locally and moved
+across when it is finished.
+
+If a run dies after the CSR is written, `--meta-only` reuses it and rebuilds only the
+database, skipping the pagelinks pass — over half the total run:
+
+```bash
+docker compose --profile ingest run --rm ingest --wiki enwiki --meta-only
+```
+
+It refuses if the CSR is missing or its article count disagrees with the page dump, and
+checks both before reading a dump rather than half an hour in.
+
 If you still need the dumps, `./fetch-dumps.sh enwiki /media/vault/WikiGraph/dumps`
 fetches all six. It downloads **sequentially on purpose** — `dumps.wikimedia.org` answers
 parallel requests from one address with 429, and a 429 lands as a 169-byte HTML error page
@@ -153,18 +170,20 @@ Measured, simplewiki, on a laptop:
 | Query (2,500 nodes) | 60–150 ms |
 | Draw (5,565 nodes) | 588 ms |
 
-Projected for enwiki from those rates — **not yet measured**:
+Measured, enwiki, on the target server:
 
 | | |
 |---|---|
-| Dumps | ~14 GB |
-| Build | 1–2 hours |
-| Articles / links | ~7M / ~0.9–1B |
-| `.csr` / `.db` | ~4 GB / ~5–8 GB |
-| Peak RAM during ingest | ~12–16 GB |
+| Build | 118 min |
+| Articles | 7,235,024 (+12.0M redirects, 2.6M categories) |
+| Links | 1,661,633,402 rows → 731,419,915 in-article → 712,208,796 unique |
+| `.csr` | 2.91 GB |
+| Categories | 102.2M memberships, 10.1M subcategory edges |
+| Topics | 33 under `Main_topic_classifications`, placing 83% of articles |
 
-The ingest is a single-threaded stream; it wants RAM and a scratch disk, not cores. Give
-it 32 GB to be comfortable.
+Where the time goes: pagelinks 53 min, categorylinks 25 min, linktarget 20 min, page
+9 min, page_props 4 min. It is a single-threaded stream — it wants RAM and a fast local
+scratch disk, not cores.
 
 ---
 

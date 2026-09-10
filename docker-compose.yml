@@ -77,17 +77,32 @@ services:
   # reachable. It only reads the dumps and writes the graph, both on the NAS.
   #
   # enwiki is a long job: the pagelinks dump alone is ~7 GB compressed and holds ~1.6
-  # billion rows. Expect one to two hours and 12–16 GB of RAM, and note it writes a
-  # scratch file beside the output that is roughly the size of the finished CSR.
+  # billion rows. Measured: just under two hours, ~730M links, a 2.9 GB CSR.
+  #
+  # SCRATCH_DIR must be on LOCAL disk, never the NAS. SQLite coordinates through POSIX
+  # advisory locks that network filesystems do not reliably provide, so building the
+  # database on the share fails with "database is locked" on a file nothing else has
+  # open — and it fails at the very end, after the expensive half has already run. The
+  # finished database is moved to the NAS once it is complete.
+  #
+  # Needs ~15 GB free for enwiki: ~6 GB edge scratch plus the database being built.
   ingest:
     build: { context: ., dockerfile: ingest/Dockerfile }
     container_name: wikigraph-ingest
     command: ["--wiki", "${WIKI:-simplewiki}"]
+    environment:
+      WIKIGRAPH_TMPDIR: /scratch
     volumes:
       - ${DATA_DIR:-/media/vault/WikiGraph}/dumps:/data/dumps:ro
       - ${DATA_DIR:-/media/vault/WikiGraph}/graph:/data/graph
+      - ${SCRATCH_DIR:-wikigraph-scratch}:/scratch
     network_mode: none
     profiles: ["ingest"]
+
+# Local scratch for the ingest. A named volume lives on the Docker host's own disk,
+# which is what this needs; override SCRATCH_DIR with a host path to put it elsewhere.
+volumes:
+  wikigraph-scratch:
 
 networks:
   proxy:
