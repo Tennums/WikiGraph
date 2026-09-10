@@ -88,6 +88,18 @@ database, skipping the pagelinks pass — over half the total run:
 docker compose --profile ingest run --rm ingest --wiki enwiki --meta-only
 ```
 
+`./ingest` is bind-mounted over the copy in the image, so edits to the ingest take effect
+on the next run with no rebuild. **The API is not** — it is a service, and its image is
+meant to be immutable — so after changing anything under `api/` or `web/`:
+
+```bash
+docker compose up -d --build api
+```
+
+`docker compose run` and `up` both reuse an existing image without rebuilding. An
+unrecognised flag in a usage message is the tell: the container is running older code
+than the working tree.
+
 It refuses if the CSR is missing or its article count disagrees with the page dump, and
 checks both before reading a dump rather than half an hour in.
 

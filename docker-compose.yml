@@ -96,6 +96,12 @@ services:
       - ${DATA_DIR:-/media/vault/WikiGraph}/dumps:/data/dumps:ro
       - ${DATA_DIR:-/media/vault/WikiGraph}/graph:/data/graph
       - ${SCRATCH_DIR:-wikigraph-scratch}:/scratch
+      # The working tree wins over the copy baked into the image. `docker compose run`
+      # reuses an existing image without rebuilding, so without this an edit to
+      # build.py is silently ignored and you debug the previous version -- which for a
+      # two-hour job is an expensive way to find out. The Dockerfile still COPYs the
+      # source, so the image also works on its own.
+      - ./ingest:/app/ingest:ro
     network_mode: none
     profiles: ["ingest"]
 
