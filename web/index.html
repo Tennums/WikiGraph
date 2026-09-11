@@ -193,12 +193,84 @@ async function draw({ push = true } = {}) {
       syncControls();
       draw();
     },
+    // The first paragraph, from Kiwix, in the card. Only offered when a reader is
+    // configured; without one the card simply has no preview block.
+    articlePreview: info.reader ? articlePreview : undefined,
   });
   const drawn = Math.round(performance.now() - t1);
 
   status((data.pathTitles ? data.pathTitles.join(" → ") + " · " : "") +
          `${data.nodes.length.toLocaleString()} articles · ` +
          `${data.edges.length.toLocaleString()} links · ${queried}ms query · ${drawn}ms draw`);
+}
+
+/**
+ * Fill the card's preview element with the article's first paragraph.
+ *
+ * Kiwix sits behind the same hostname as this page, so the fetch is same-origin: no
+ * CORS, no proxy, nothing for the API to do. The HTML is mwoffliner's, which keeps
+ * the article body under `#mw-content-text`; the intro is the first real paragraph
+ * there -- past the hatnotes ("For other uses, see …"), past the infobox table, past
+ * the empty `<p>` mwoffliner leaves around block elements.
+ *
+ * Cached per title for the session, and the previous fetch is aborted when the
+ * selection moves on, so a fast walk through the linked-articles list does not queue
+ * up a dozen requests whose answers arrive for cards that are already gone.
+ */
+const previewCache = new Map();
+let previewAbort = null;
+
+async function articlePreview(label, el) {
+  if (previewAbort) previewAbort.abort();
+  const ctl = new AbortController();
+  previewAbort = ctl;
+
+  const title = label.replace(/ /g, "_");
+  if (previewCache.has(title)) return showPreview(el, previewCache.get(title));
+
+  el.hidden = false;
+  el.classList.add("pending");
+  el.textContent = "loading…";
+
+  let text = null;
+  try {
+    const res = await fetch(`${info.reader}/${encodeURIComponent(title)}`, { signal: ctl.signal });
+    if (res.ok) text = firstParagraph(await res.text());
+  } catch (e) {
+    if (e.name === "AbortError") return;   // superseded; the next card is drawing
+  }
+  previewCache.set(title, text);
+  if (!ctl.signal.aborted) showPreview(el, text);
+}
+
+function showPreview(el, text) {
+  el.classList.remove("pending");
+  if (!text) { el.hidden = true; el.textContent = ""; return; }
+  el.hidden = false;
+  el.textContent = text;
+  // If it all fits, no fade: the fade is a promise of more.
+  requestAnimationFrame(() => el.classList.toggle("short", el.scrollHeight <= el.clientHeight + 2));
+}
+
+function firstParagraph(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const root = doc.querySelector("#mw-content-text") ?? doc.body;
+  for (const p of root.querySelectorAll("p")) {
+    // Anything inside a table (infobox), a hatnote, a navbox, or a reference block is
+    // not the article's own opening sentence.
+    if (p.closest("table, .hatnote, .dablink, .navbox, .reflist, .mw-empty-elt, .thumb, figure")) continue;
+    for (const sup of p.querySelectorAll("sup, .reference, .mw-editsection")) sup.remove();
+    const t = p.textContent.replace(/\s+/g, " ").replace(/\[\d+\]/g, "").trim();
+    // A coordinate line or a one-word stub caption is not an intro either.
+    if (t.length < 40 || /^Coordinates:/i.test(t)) continue;
+    // Cut at a sentence end past ~500 characters, so the fade lands between thoughts.
+    if (t.length > 640) {
+      const cut = t.slice(0, 640).search(/[.!?]\s[^.!?]*$/);
+      return cut > 300 ? t.slice(0, cut + 1) : t.slice(0, 600) + "…";
+    }
+    return t;
+  }
+  return null;
 }
 
 // Typeahead straight off the title index, shared by both inputs.

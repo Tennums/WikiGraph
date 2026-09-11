@@ -29,6 +29,12 @@ thousand articles chosen for a reason:
 | **Category tree** | everything under a category, N levels deep | direct subcategories |
 | **Most linked-to** | the top articles by in-degree | subject area |
 
+**The detail card shows the article's first paragraph.** Kiwix sits behind the same
+hostname, so the page fetches the article itself — same origin, no proxy — and takes the
+first real paragraph out of mwoffliner's HTML: past the hatnotes, past the infobox. Cached
+per title for the session; a fetch is abandoned the moment the selection moves on. With no
+ZIM configured the card simply has no preview, as it has no read button.
+
 Every view is a URL. The controls mirror into the hash —
 `#view=path&q=Cheese&q2=Black+hole&limit=1000` — so a view can be bookmarked or sent,
 and the browser's back button retraces a walk. The detail card's **Draw around this**
@@ -206,6 +212,10 @@ lines are commented out, to be re-enabled only to bypass the proxy while debuggi
 
 The ingest runs with `network_mode: none` — it serves nothing and only moves files between
 two NAS directories.
+
+Without Caddy — on a laptop, say — set `KIWIX_PROXY=http://localhost:8080` and the API
+forwards `/kiwix/*` itself, so the same-origin article fetch works the same way. It is a
+development convenience, not a production path.
 
 Two settings have to agree, and there is nothing to catch it if they drift: `KIWIX_URL`
 (what the API writes into article links) and `kiwix-serve -r` (what Kiwix answers on). Both

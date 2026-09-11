@@ -5014,6 +5014,10 @@ function mountVaultGraph(root, data, deps) {
     // Likewise "draw around this": the host decides what a new centre means (here, a
     // fresh neighbourhood query). Absent, no button.
     var canRecenter = typeof deps.onRecenter === "function" && !a.ghost;
+    // And a preview: the host is handed an empty element after the card renders and
+    // fills it however it likes (here, the article's first paragraph from Kiwix). The
+    // card itself never fetches anything.
+    var canPreview = typeof deps.articlePreview === "function" && !a.ghost;
     var file = encodeURIComponent(a.path.replace(/\.md$/, ""));
 
     var h = '<button class="x" title="Close">&times;</button>' +
@@ -5030,6 +5034,7 @@ function mountVaultGraph(root, data, deps) {
       }).join("") + '</div>' +
       '<div class="chip" style="border-style:dashed">' + esc(a.folder) +
         (a.sub ? ' / ' + esc(a.sub) : '') + ' / ' + esc(a.ntype) + '</div>' +
+      (canPreview ? '<div class="preview" hidden></div>' : "") +
       '<div class="actions">' +
         (a.ghost || !openHref ? "" : '<a class="open" href="' + esc(openHref) + '" target="_blank" rel="noopener">Read the article &rarr;</a>') +
         '<button class="btn pin" data-pin="' + id + '" aria-pressed="' + isPinned(id) + '" title="' +
@@ -5059,6 +5064,8 @@ function mountVaultGraph(root, data, deps) {
     d.querySelector(".pin").onclick = function () { togglePin(id); select(id); };
     var rc = d.querySelector(".recenter");
     if (rc) rc.onclick = function () { deps.onRecenter(a.label); };
+    var pv = d.querySelector(".preview");
+    if (pv) deps.articlePreview(a.label, pv);
     Array.prototype.forEach.call(d.querySelectorAll("[data-go]"), /** @param {HTMLElement} b */ function (b) {
       b.onclick = function () { goTo(b.getAttribute("data-go")); };
     });

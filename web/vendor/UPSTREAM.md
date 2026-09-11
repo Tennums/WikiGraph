@@ -7,9 +7,11 @@ from `src/engine/` with esbuild. That verbatim import is commit `afcc942` in thi
 
 It is no longer verbatim. The user-facing vocabulary has been changed from Obsidian's
 (vault, note, folder) to Wikipedia's (wiki, article, topic), and the detail card gained
-two host callbacks: `deps.articleHref(label)` supplies the open button's target instead
-of a hardcoded `obsidian://` URL, and `deps.onRecenter(label)` adds a "Draw around this"
-button when present. Layout, rendering and interaction are untouched.
+three host callbacks: `deps.articleHref(label)` supplies the open button's target instead
+of a hardcoded `obsidian://` URL, `deps.onRecenter(label)` adds a "Draw around this"
+button when present, and `deps.articlePreview(label, el)` is handed an empty element in
+the card to fill (here, the article's first paragraph). `page.css` gained the `.preview`
+rules beside the card's other styles. Layout, rendering and interaction are untouched.
 
 ## Pulling in an upstream release
 

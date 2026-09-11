@@ -6,7 +6,7 @@
  * and nothing to audit or update.
  */
 
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { existsSync, readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
@@ -21,6 +21,11 @@ const WEB_DIR = process.env.WEB_DIR ?? "web";
 const KIWIX_URL = (process.env.KIWIX_URL ?? "").replace(/\/$/, "");
 const KIWIX_BOOK = process.env.KIWIX_BOOK ?? "";
 const MAX_NODES = Number(process.env.MAX_NODES ?? 6000);
+// Development only. In production Caddy routes /kiwix/* to the kiwix container on the
+// same hostname, which is what lets the page fetch article text same-origin. With no
+// Caddy in front (a laptop, or a single-port setup) this forwards the same prefix to a
+// kiwix-serve running elsewhere, so the same-origin path can be exercised as is.
+const KIWIX_PROXY = (process.env.KIWIX_PROXY ?? "").replace(/\/$/, "");
 
 // Fail with a sentence, not a stack trace. The usual cause of a missing graph is not a
 // missing graph: it is WIKI falling back to its default because .env is absent -- a
@@ -99,9 +104,19 @@ async function serveStatic(url, res) {
   }
 }
 
+function proxyKiwix(req, res) {
+  const target = new URL(req.url, KIWIX_PROXY);
+  const up = httpRequest(target, { method: req.method, headers: { ...req.headers, host: target.host } },
+    (r) => { res.writeHead(r.statusCode ?? 502, r.headers); r.pipe(res); });
+  up.on("error", () => { res.writeHead(502).end("kiwix unreachable"); });
+  req.pipe(up);
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   const q = url.searchParams;
+
+  if (KIWIX_PROXY && url.pathname.startsWith("/kiwix")) return proxyKiwix(req, res);
 
   try {
     switch (url.pathname) {
