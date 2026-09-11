@@ -76,9 +76,14 @@ class Csr {
   }
 }
 
+/** Node kinds, as the ingest writes them into <wiki>.kind. */
+export const KIND = { article: 0, list: 1, date: 2, dab: 3, infra: 4 };
+export const KIND_NAMES = ["article", "list", "date", "dab", "infra"];
+
 export class WikiGraph {
-  /** @param {string} csrPath @param {string} rcsrPath @param {string} dbPath */
-  constructor(csrPath, rcsrPath, dbPath) {
+  /** @param {string} csrPath @param {string} rcsrPath @param {string} dbPath
+   *  @param {string} kindPath */
+  constructor(csrPath, rcsrPath, dbPath, kindPath) {
     this.out = new Csr(csrPath);   // who this article links to
     this.in = new Csr(rcsrPath);   // who links to this article
     if (this.in.n !== this.out.n || this.in.m !== this.out.m) {
@@ -94,6 +99,24 @@ export class WikiGraph {
     this.indeg = this.in.degrees();
     this._topOrder = null;
 
+    // One byte per article: list, date page, disambiguation, template-linked
+    // infrastructure, or a plain article. Selections skip whatever kinds the caller
+    // asks to hide; the ingest only labels, so what counts as noise stays a view
+    // setting rather than a build decision.
+    const kb = Buffer.allocUnsafe(HEADER);
+    const kfd = openSync(kindPath, "r");
+    readSync(kfd, kb, 0, HEADER, 0);
+    if (Number(kb.readBigInt64LE(0)) !== MAGIC || Number(kb.readBigInt64LE(16)) !== this.n) {
+      closeSync(kfd);
+      throw new Error(`${kindPath} does not match ${csrPath} -- rebuild with --classify-only`);
+    }
+    const kbuf = Buffer.allocUnsafe(this.n);
+    readSync(kfd, kbuf, 0, this.n, HEADER);
+    closeSync(kfd);
+    this.kind = new Uint8Array(kbuf.buffer, kbuf.byteOffset, this.n);
+    this.kindCounts = KIND_NAMES.map((_, k) => 0);
+    for (let i = 0; i < this.n; i++) this.kindCounts[this.kind[i]]++;
+
     this.db = new DatabaseSync(dbPath, { readOnly: true });
     this.meta = Object.fromEntries(
       this.db.prepare("SELECT k, v FROM meta").all().map((r) => [r.k, r.v]),
@@ -104,6 +127,18 @@ export class WikiGraph {
     this.db.close();
     this.out.close();
     this.in.close();
+  }
+
+  /**
+   * Build the "is this article allowed" test for a set of hidden kind names. Kept as a
+   * closure over a small typed array so the hot loops below pay one index and one
+   * compare per candidate, not a Set lookup on a string.
+   */
+  allow(hide = []) {
+    const mask = new Uint8Array(KIND_NAMES.length);
+    for (const name of hide) if (KIND[name] !== undefined) mask[KIND[name]] = 1;
+    const kind = this.kind;
+    return (idx) => mask[kind[idx]] === 0;
   }
 
   /** Out-neighbours; kept under the old name because toVaultData draws edges from it. */
@@ -132,12 +167,14 @@ export class WikiGraph {
    * re-ranking happens here -- cheaper than a schema change, and it means the graph
    * files alone decide what "important" means.
    */
-  search(q, limit = 20) {
+  search(q, limit = 20, hide = []) {
+    const ok = this.allow(hide);
     const rows = this.db
       .prepare("SELECT idx, title FROM node WHERE title LIKE ? LIMIT ?")
       .all(String(q).trim().replace(/ /g, "_") + "%", Math.max(200, limit * 10));
     return rows
       .map((r) => ({ idx: Number(r.idx), title: String(r.title), deg: this.indeg[Number(r.idx)] }))
+      .filter((h) => ok(h.idx))
       .sort((a, b) => b.deg - a.deg)
       .slice(0, limit);
   }
@@ -157,7 +194,8 @@ export class WikiGraph {
    * `direction` is which links to follow: "out" (what this article cites), "in" (what
    * cites it -- "what links here"), or "both".
    */
-  neighborhood(seed, { hops = 2, limit = 3000, direction = "both" } = {}) {
+  neighborhood(seed, { hops = 2, limit = 3000, direction = "both", hide = [] } = {}) {
+    const ok = this.allow(hide);
     const expand = (u) => {
       if (direction === "out") return [this.out.neighbours(u)];
       if (direction === "in") return [this.in.neighbours(u)];
@@ -170,7 +208,7 @@ export class WikiGraph {
       for (const u of frontier) {
         for (const list of expand(u)) {
           for (const v of list) {
-            if (!seen.has(v) && !next.has(v)) next.set(v, this.indeg[v]);
+            if (!seen.has(v) && !next.has(v) && ok(v)) next.set(v, this.indeg[v]);
           }
         }
       }
@@ -192,8 +230,11 @@ export class WikiGraph {
    * target would read most of the graph; meeting in the middle keeps both frontiers
    * to a few thousand articles. Returns the path as node ids, or null.
    */
-  path(a, b, { maxDepth = 8, maxVisited = 4_000_000 } = {}) {
+  path(a, b, { maxDepth = 8, maxVisited = 4_000_000, hide = [] } = {}) {
     if (a === b) return [a];
+    // The endpoints are the user's choice and always allowed; a hidden kind is only
+    // refused as a stepping stone. Without this every path went through a list page.
+    const ok = this.allow(hide);
     const fwd = new Map([[a, -1]]);   // node -> parent towards a
     const bwd = new Map([[b, -1]]);   // node -> parent towards b
     let fFront = [a], bFront = [b];
@@ -217,6 +258,7 @@ export class WikiGraph {
       for (const u of front) {
         for (const v of csr.neighbours(u)) {
           if (own.has(v)) continue;
+          if (!ok(v) && v !== a && v !== b) continue;
           own.set(v, u);
           if (other.has(v)) return meet(v);
           next.push(v);
@@ -228,7 +270,8 @@ export class WikiGraph {
   }
 
   /** Every article filed under `catPid`, walking `depth` levels of subcategories. */
-  categorySubtree(catPid, { depth = 3, limit = 3000 } = {}) {
+  categorySubtree(catPid, { depth = 3, limit = 3000, hide = [] } = {}) {
+    const ok = this.allow(hide);
     const kids = this.db.prepare("SELECT child FROM cat_tree WHERE parent = ?");
     const members = this.db.prepare("SELECT idx FROM node_cat WHERE cat = ?");
 
@@ -257,7 +300,7 @@ export class WikiGraph {
     outer: for (const c of order) {
       for (const r of members.all(c)) {
         const idx = Number(r.idx);
-        if (branch.has(idx)) continue;
+        if (branch.has(idx) || !ok(idx)) continue;
         branch.set(idx, branchOf.get(c));
         ids.push(idx);
         if (ids.length >= limit) break outer;
@@ -274,7 +317,8 @@ export class WikiGraph {
    * lets Float64Array.sort run without a comparator, which is what makes ordering
    * enwiki's 7M articles a sub-second startup cost rather than a 30-second one.
    */
-  top(limit = 3000) {
+  top(limit = 3000, hide = []) {
+    const ok = this.allow(hide);
     if (!this._topOrder) {
       const key = new Float64Array(this.n);
       for (let i = 0; i < this.n; i++) key[i] = this.indeg[i] * 16777216 + i;
@@ -283,7 +327,8 @@ export class WikiGraph {
     }
     const out = [];
     for (let k = this.n - 1; k >= 0 && out.length < limit; k--) {
-      out.push(this._topOrder[k] % 16777216);
+      const idx = this._topOrder[k] % 16777216;
+      if (ok(idx)) out.push(idx);
     }
     return out;
   }
@@ -360,7 +405,8 @@ export class WikiGraph {
         // that a category view does not, so it rides along as the node's type. The
         // detail card prints it after the topic ("Science / 2 hops away").
         type: typeOf ? typeOf(id) : depth ? hopLabel(depth.get(id) ?? 0) : "article",
-        tags: [],
+        // The kind rides along as a tag so the card shows why a list page is a list page.
+        tags: this.kind[id] ? [KIND_NAMES[this.kind[id]]] : [],
         // `page` carries no creation date -- only `page_touched`. The timeline is
         // therefore "last edited", and the UI says so rather than implying growth.
         created: t ? `${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6, 8)}` : "",

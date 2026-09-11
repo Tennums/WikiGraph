@@ -39,6 +39,29 @@ search hit, and the "most linked-to" list. Out-degree measures how much an artic
 and lists win it: by out-degree simplewiki's top articles are `List of municipalities in
 Switzerland` and `Deaths in 2024`. By in-degree they are `United States` and `France`.
 
+**Four kinds of page can be hidden from every view** — lists, date pages, disambiguation
+pages, and what the UI calls *infobox links*: articles such as `Population`, `Time zone`
+or `Wayback Machine` that every place or biography links to from a template. They are
+among the most linked-to pages on any Wikipedia and carry no topical signal, and no graph
+measure separates them from genuine hubs like `United States`, so they are named in
+[`ingest/infrastructure.txt`](ingest/infrastructure.txt). Lists and dates are recognised by
+title shape; disambiguation pages by the `page_props` flag, which catches the thousands
+whose title does not say so. The classification lives in a one-byte-per-article sidecar,
+`<wiki>.kind`, written by the ingest or added to an existing build with:
+
+```bash
+docker compose --profile ingest run --rm ingest --wiki enwiki --classify-only
+```
+
+That run ends by printing the top 40 articles by in-degree with their kind. Whatever sits
+there still labelled *article* is the next candidate for `infrastructure.txt` — or a real
+hub that belongs. On simplewiki, hiding all four turns the most-linked-to list from
+`Geographic coordinate system, Wayback Machine, Population…` into `United States, France,
+Germany, City…`.
+
+A hidden kind is refused as a stepping stone in a path search but never as an endpoint:
+the endpoints are the user's choice.
+
 Degree *on the disc* is recomputed over each selection rather than taken globally: the
 disc rings articles by the links it can actually see, and a global degree would pull
 articles to the centre for links to nodes that are not on screen.
@@ -95,7 +118,7 @@ All state lives on the NAS under `DATA_DIR`; the containers hold nothing of thei
 ```
 /media/vault/WikiGraph/
 ├── dumps/     enwiki-latest-*.sql.gz     (input, mounted read-only)
-├── graph/     enwiki.csr, .rcsr, .db     (built once, then read-only)
+├── graph/     enwiki.csr, .rcsr, .db, .kind   (built once, then read-only)
 └── zim/       <ZIM_BOOK>.zim              (Kiwix)
 ```
 

@@ -10,7 +10,7 @@ import { createServer } from "node:http";
 import { existsSync, readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
-import { WikiGraph } from "./graph.mjs";
+import { WikiGraph, KIND_NAMES } from "./graph.mjs";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const WIKI = process.env.WIKI ?? "simplewiki";
@@ -26,15 +26,18 @@ const MAX_NODES = Number(process.env.MAX_NODES ?? 6000);
 // missing graph: it is WIKI falling back to its default because .env is absent -- a
 // fresh clone has no .env, since it is deliberately untracked -- and an ENOENT for
 // simplewiki.csr says nothing about that while the enwiki graph sits right beside it.
-for (const ext of ["csr", "rcsr", "db"]) {
+for (const ext of ["csr", "rcsr", "db", "kind"]) {
   const want = join(GRAPH_DIR, `${WIKI}.${ext}`);
   if (existsSync(want)) continue;
   const have = existsSync(GRAPH_DIR)
-    ? readdirSync(GRAPH_DIR).filter((f) => /\.(csr|rcsr|db)$/.test(f)).sort()
+    ? readdirSync(GRAPH_DIR).filter((f) => /\.(csr|rcsr|db|kind)$/.test(f)).sort()
     : [];
   const hint = ext === "rcsr" && have.includes(`${WIKI}.csr`)
     ? `the in-link graph is missing; derive it from the existing .csr with\n  ` +
       `docker compose --profile ingest run --rm ingest --wiki ${WIKI} --reverse-only`
+    : ext === "kind" && have.includes(`${WIKI}.db`)
+    ? `the article-kind file is missing; label the existing build with\n  ` +
+      `docker compose --profile ingest run --rm ingest --wiki ${WIKI} --classify-only`
     : have.length
     ? `${GRAPH_DIR} holds: ${have.join(", ")} -- is WIKI set in .env? ` +
       `(WIKI is "${WIKI}"${process.env.WIKI ? "" : ", the default: no WIKI in the environment"})`
@@ -45,7 +48,7 @@ for (const ext of ["csr", "rcsr", "db"]) {
 }
 
 const graph = new WikiGraph(join(GRAPH_DIR, `${WIKI}.csr`), join(GRAPH_DIR, `${WIKI}.rcsr`),
-                            join(GRAPH_DIR, `${WIKI}.db`));
+                            join(GRAPH_DIR, `${WIKI}.db`), join(GRAPH_DIR, `${WIKI}.kind`));
 console.log(`wikigraph: ${WIKI} — ${graph.n.toLocaleString()} articles, ` +
             `${graph.m.toLocaleString()} links`);
 
@@ -63,6 +66,10 @@ const json = (res, code, body) => {
 
 /** Clamp to the budget the renderer can actually animate. */
 const budget = (v, dflt) => Math.max(1, Math.min(MAX_NODES, Number(v) || dflt));
+
+/** `hide=list,date,dab,infra` -> the kind names to leave out of a selection. */
+const hidden = (q) => (q.get("hide") ?? "").split(",").map((x) => x.trim())
+  .filter((x) => KIND_NAMES.includes(x) && x !== "article");
 
 async function serveStatic(url, res) {
   // normalize() before the prefix check: without it "/../api/graph.mjs" escapes WEB_DIR.
@@ -97,13 +104,14 @@ const server = createServer(async (req, res) => {
         return json(res, 200, {
           ...graph.meta,
           maxNodes: MAX_NODES,
+          kinds: Object.fromEntries(KIND_NAMES.map((k, i) => [k, graph.kindCounts[i]])),
           // kiwix-serve exposes an article at /content/<book>/<Title>. The book name
           // is the ZIM's filename without its extension.
           reader: KIWIX_URL && KIWIX_BOOK ? `${KIWIX_URL}/content/${KIWIX_BOOK}` : null,
         });
 
       case "/api/search":
-        return json(res, 200, graph.search(q.get("q") ?? "", budget(q.get("limit"), 20)));
+        return json(res, 200, graph.search(q.get("q") ?? "", budget(q.get("limit"), 20), hidden(q)));
 
       /* Every view returns the same VAULT_DATA shape; only the selection differs. */
       case "/api/view/neighborhood": {
@@ -113,7 +121,7 @@ const server = createServer(async (req, res) => {
         const hops = Math.max(1, Math.min(4, Number(q.get("hops")) || 2));
         const direction = ["in", "out", "both"].includes(q.get("direction"))
           ? q.get("direction") : "both";
-        const sel = graph.neighborhood(seed, { hops, limit, direction });
+        const sel = graph.neighborhood(seed, { hops, limit, direction, hide: hidden(q) });
         const name = graph.titleOf(seed).replace(/_/g, " ");
         const title = direction === "in" ? `What links to ${name}`
                     : direction === "out" ? `What ${name} links to` : name;
@@ -129,7 +137,8 @@ const server = createServer(async (req, res) => {
         if (a < 0) return json(res, 404, { error: `no article "${q.get("from")}"` });
         if (b < 0) return json(res, 404, { error: `no article "${q.get("to")}"` });
         const t0 = Date.now();
-        const path = graph.path(a, b);
+        const hide = hidden(q);
+        const path = graph.path(a, b, { hide });
         if (!path) return json(res, 404, { error: "no link path found within 8 hops" });
         const limit = budget(q.get("limit"), 2500);
         const onPath = new Set(path);
@@ -138,7 +147,7 @@ const server = createServer(async (req, res) => {
         // the rest of it.
         const per = Math.max(20, Math.floor((limit - path.length) / path.length));
         for (const u of path) {
-          const near = graph.neighborhood(u, { hops: 1, limit: per + 1, direction: "both" });
+          const near = graph.neighborhood(u, { hops: 1, limit: per + 1, direction: "both", hide });
           for (const v of near.ids) if (!onPath.has(v) && ids.length < limit) { ids.push(v); onPath.add(v); }
         }
         const names = path.map((i) => graph.titleOf(i).replace(/_/g, " "));
@@ -158,6 +167,7 @@ const server = createServer(async (req, res) => {
         const sel = graph.categorySubtree(pid, {
           depth: Math.max(1, Math.min(6, Number(q.get("depth")) || 3)),
           limit: budget(q.get("limit"), 3000),
+          hide: hidden(q),
         });
         if (!sel.ids.length) return json(res, 404, { error: "category holds no articles" });
         return json(res, 200, graph.toVaultData(sel.ids, {
@@ -167,8 +177,8 @@ const server = createServer(async (req, res) => {
       }
 
       case "/api/view/top":
-        return json(res, 200, graph.toVaultData(graph.top(budget(q.get("limit"), 2000)), {
-          title: `${WIKI} — best connected`,
+        return json(res, 200, graph.toVaultData(graph.top(budget(q.get("limit"), 2000), hidden(q)), {
+          title: `${WIKI} — most linked-to`,
         }));
 
       default:

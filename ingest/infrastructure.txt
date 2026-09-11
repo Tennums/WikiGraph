@@ -1,0 +1,128 @@
+# Articles linked from templates rather than prose.
+#
+# Every place infobox links to Population and Time zone; every biography cites the
+# Wayback Machine; every species links to Taxonomy. These are among the most
+# linked-to pages on any Wikipedia and carry no topical signal at all -- an article's
+# link to UTC+01:00 says where it is, not what it is about. There is no graph measure
+# that separates them from genuine hubs like United States (linked from everywhere,
+# for a reason), so they are named here instead.
+#
+# One title per line, underscores for spaces, as the page table spells it. Lines
+# starting with # are comments. Seeded from simplewiki's top-100 by in-degree; the
+# ingest prints the top 40 with their classification after every run, which is where
+# the next additions come from. Case-sensitive after the first letter.
+
+# --- identifiers and citation plumbing
+International_Standard_Book_Number
+ISBN
+Digital_Object_Identifier
+Digital_object_identifier
+Doi
+PubMed_Identifier
+PubMed
+PubMed_Central
+PMID
+OCLC
+Online_Computer_Library_Center
+JSTOR
+Bibcode
+ArXiv
+Semantic_Scholar
+International_Standard_Serial_Number
+ISSN
+Library_of_Congress_Control_Number
+Virtual_International_Authority_File
+Integrated_Authority_File
+Wayback_Machine
+Internet_Archive
+Internet_Movie_Database
+IMDb
+Google_Books
+Wikidata
+Wikimedia_Commons
+Find_a_Grave
+Open_Library
+Hansard
+
+# --- place-infobox vocabulary
+Geographic_coordinate_system
+Geographic_coordinates
+Population
+Population_density
+Time_zone
+Daylight_saving_time
+Coordinated_Universal_Time
+UTC
+UTC−12:00
+UTC−11:00
+UTC−10:00
+UTC−09:00
+UTC−08:00
+UTC−07:00
+UTC−06:00
+UTC−05:00
+UTC−04:00
+UTC−03:00
+UTC−02:00
+UTC−01:00
+UTC±00:00
+UTC+00:00
+UTC+01:00
+UTC+02:00
+UTC+03:00
+UTC+04:00
+UTC+05:00
+UTC+05:30
+UTC+06:00
+UTC+07:00
+UTC+08:00
+UTC+09:00
+UTC+10:00
+UTC+11:00
+UTC+12:00
+Central_European_Time
+Central_European_Summer_Time
+Eastern_Time_Zone
+Pacific_Time_Zone
+Central_Time_Zone
+Mountain_Time_Zone
+Greenwich_Mean_Time
+British_Summer_Time
+Postal_code
+Postcode
+ZIP_Code
+Telephone_numbering_plan
+Area_code
+Vehicle_registration_plate
+County_seat
+Unincorporated_area
+Census-designated_place
+United_States_Census_Bureau
+2000_United_States_Census
+2010_United_States_Census
+2020_United_States_Census
+INSEE
+Elevation
+Land_area
+Square_kilometre
+Square_mile
+Metre
+Kilometre
+Mile
+Hectare
+Acre
+
+# --- taxobox and other template vocabulary
+Taxonomy
+Taxonomy_(biology)
+Binomial_nomenclature
+Conservation_status
+IUCN_Red_List
+Record_label
+Genre
+Studio_album
+Single_(music)
+Gregorian_calendar
+Julian_calendar
+Anno_Domini
+Common_Era

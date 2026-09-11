@@ -158,6 +158,72 @@ def write_reverse(csr: Path, rcsr: Path) -> None:
         f"max in-degree {int(indeg.max()):,}")
 
 
+import re
+
+# Node kinds, one byte per article in <wiki>.kind. The API hides kinds on request; the
+# ingest only labels. 0 is the default and never needs writing.
+KIND_ARTICLE, KIND_LIST, KIND_DATE, KIND_DAB, KIND_INFRA = 0, 1, 2, 3, 4
+KIND_NAMES = {KIND_ARTICLE: "article", KIND_LIST: "list", KIND_DATE: "date",
+              KIND_DAB: "disambiguation", KIND_INFRA: "infrastructure"}
+
+# A list page is a list by title on every Wikipedia; this is the convention, not a
+# heuristic. Timeline_of_ is arguably a date page but behaves like a list.
+RE_LIST = re.compile(
+    r"^(Lists?|Index|Outline|Timeline|Glossary|Bibliography|Discography|Filmography|"
+    r"Comparison)_of_")
+# Bare years and decades, centuries, calendar days, deaths-in and year-in-topic pages.
+# Anchored at both ends so "1984 (novel)" and "2024 Summer Olympics" stay articles.
+RE_DATE = re.compile(
+    r"^(\d{1,4}(_BC)?|\d{3,4}s|\d{1,2}(st|nd|rd|th)_(century|millennium)(_BC)?|"
+    r"(January|February|March|April|May|June|July|August|September|October|November|"
+    r"December)_\d{1,2}|Deaths_in_\d{4}|\d{4}_in_.+)$")
+RE_DAB_TITLE = re.compile(r"_\(disambiguation\)$")
+
+
+def classify(titles, dab_idx, infra_titles):
+    """One kind byte per article, from title shape, the disambiguation flag, and the
+    infrastructure list. Order matters only where two rules match; infrastructure is
+    checked first because it is the deliberate one."""
+    kind = np.zeros(len(titles), dtype=np.uint8)
+    for i, t in enumerate(titles):
+        if t in infra_titles:
+            kind[i] = KIND_INFRA
+        elif i in dab_idx or RE_DAB_TITLE.search(t):
+            kind[i] = KIND_DAB
+        elif RE_LIST.match(t):
+            kind[i] = KIND_LIST
+        elif RE_DATE.match(t):
+            kind[i] = KIND_DATE
+    return kind
+
+
+def write_kinds(out: Path, wiki: str, titles, dab_idx: set, indeg=None) -> None:
+    infra_path = Path(__file__).parent / "infrastructure.txt"
+    infra = set()
+    if infra_path.exists():
+        for line in infra_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                infra.add(line)
+    kind = classify(titles, dab_idx, infra)
+    n = len(titles)
+    path = out / f"{wiki}.kind"
+    with open(path, "wb") as fh:
+        np.array([MAGIC, 1, n, 0], dtype=np.int64).tofile(fh)
+        kind.tofile(fh)
+    counts = np.bincount(kind, minlength=5)
+    log(f"wrote {path}: " + ", ".join(f"{counts[k]:,} {KIND_NAMES[k]}" for k in range(1, 5)))
+
+    # The list of infrastructure pages is curated, and this is where it grows from:
+    # whatever sits in the top 40 by in-degree and is still labelled "article" is the
+    # next candidate. Printed, not decided -- United States belongs there too.
+    if indeg is not None:
+        log("top 40 by in-degree, with kind (unlabelled hubs may belong in infrastructure.txt):")
+        for i in np.argsort(-indeg)[:40]:
+            tag = KIND_NAMES[int(kind[i])]
+            log(f"  {int(indeg[i]):8,}  {tag:14}  {titles[i]}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--wiki", default="simplewiki", help="e.g. simplewiki, enwiki")
@@ -173,6 +239,10 @@ def main() -> None:
     ap.add_argument("--reverse-only", action="store_true",
                     help="derive the in-link .rcsr from an existing .csr and stop; "
                          "reads no dumps, touches no database")
+    ap.add_argument("--classify-only", action="store_true",
+                    help="write <wiki>.kind (list / date / disambiguation / "
+                         "infrastructure) for an existing build; reads the page and "
+                         "page_props dumps and the existing .db, writes nothing else")
     ap.add_argument("--topic-root", default="",
                     help="category whose children become the wedges "
                          "(default: Main_topic_classifications, then Articles)")
@@ -188,6 +258,40 @@ def main() -> None:
         if not csr.exists():
             sys.exit(f"--reverse-only needs an existing {csr}")
         write_reverse(csr, args.out / f"{args.wiki}.rcsr")
+        return
+
+    if args.classify_only:
+        # Titles come from the existing database (read-only, which a NAS mount is fine
+        # with). The disambiguation flag lives in page_props keyed by page id, and the
+        # database does not keep page ids, so the page dump is read once to map them.
+        db = args.out / f"{args.wiki}.db"
+        if not db.exists():
+            sys.exit(f"--classify-only needs an existing {db}")
+        log("reading titles from the database ...")
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        rows = con.execute("SELECT idx, title FROM node ORDER BY idx").fetchall()
+        con.close()
+        titles = [t for _, t in rows]
+        title2idx = {t: i for i, t in rows}
+        log(f"  {len(titles):,} articles")
+        log("reading page (for page ids) ...")
+        pid2idx_map = {}
+        for pid, ns, title, is_redirect, _, _ in dp.pages(dump(args.wiki, "page", args.dumps)):
+            if ns == NS_ARTICLE and not is_redirect:
+                i = title2idx.get(title)
+                if i is not None:
+                    pid2idx_map[pid] = i
+        del title2idx
+        log("reading page_props (for the disambiguation flag) ...")
+        dab = {pid2idx_map[pid] for pid, name, _ in
+               dp.pageprops(dump(args.wiki, "page_props", args.dumps))
+               if name == "disambiguation" and pid in pid2idx_map}
+        rcsr = args.out / f"{args.wiki}.rcsr"
+        indeg = None
+        if rcsr.exists():
+            hn = int(np.fromfile(rcsr, dtype=np.int64, count=4)[2])
+            indeg = np.diff(np.fromfile(rcsr, dtype=np.int64, count=hn + 1, offset=HEADER))
+        write_kinds(args.out, args.wiki, titles, dab, indeg)
         return
 
     tmp = args.tmpdir or Path(tempfile.gettempdir())
@@ -436,10 +540,13 @@ def main() -> None:
     # MediaWiki flags them with the `hiddencat` page property; title-prefix guessing
     # gets most of them and wrongly condemns real topics, so we read the flag.
     log("reading page_props ...")
-    hidden = {pid for pid, name, _ in
-              dp.pageprops(dump(args.wiki, "page_props", args.dumps))
-              if name == "hiddencat"}
-    log(f"  {len(hidden):,} hidden categories")
+    hidden, dab_idx = set(), set()
+    for pid, name, _ in dp.pageprops(dump(args.wiki, "page_props", args.dumps)):
+        if name == "hiddencat":
+            hidden.add(pid)
+        elif name == "disambiguation" and pid <= max_pid and pid2idx[pid] >= 0:
+            dab_idx.add(int(pid2idx[pid]))
+    log(f"  {len(hidden):,} hidden categories, {len(dab_idx):,} disambiguation pages")
 
     # --------------------------------------------------------------- 7. topics
     #
@@ -564,6 +671,10 @@ def main() -> None:
     db.unlink(missing_ok=True)
     shutil.move(str(staged), str(db))
     log(f"done: {n:,} nodes, {write:,} edges, {db.stat().st_size / 1e6:.0f} MB metadata")
+
+    rn = int(np.fromfile(rcsr, dtype=np.int64, count=4)[2])
+    indeg = np.diff(np.fromfile(rcsr, dtype=np.int64, count=rn + 1, offset=HEADER))
+    write_kinds(args.out, args.wiki, art_title, dab_idx, indeg)
 
 
 if __name__ == "__main__":

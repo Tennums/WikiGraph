@@ -23,6 +23,11 @@
   input[type=text] { width: 220px; }
   button { cursor: pointer; }
   button:hover { background: #2c323c; }
+  #hide { display: inline-flex; gap: 10px; align-items: center; padding-left: 10px;
+          border-left: 1px solid #2c313a; }
+  #hide label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer;
+                white-space: nowrap; }
+  #hide input { margin: 0; accent-color: #9fd0ff; }
   #status { margin-left: auto; color: #8b93a1; }
   #status.err { color: #ff8b8b; }
 
@@ -60,6 +65,15 @@
   <select id="hops"><option>1</option><option selected>2</option><option>3</option></select>
 
   <button id="go">Draw</button>
+
+  <span id="hide" title="Kinds of page to leave out of every view">
+    <label>Hide</label>
+    <label><input type="checkbox" value="list" checked> lists</label>
+    <label><input type="checkbox" value="date" checked> dates</label>
+    <label><input type="checkbox" value="dab" checked> disambiguation</label>
+    <label><input type="checkbox" value="infra" checked> infobox links</label>
+  </span>
+
   <span id="status">loading…</span>
 </div>
 
@@ -93,11 +107,17 @@ const markup = await (await fetch("vendor/page.html")).text();
  * shared link is just a link and the API stays cacheable by path.
  */
 const FIELDS = ["view", "q", "q2", "limit", "hops"];
+const hideBoxes = () => [...document.querySelectorAll("#hide input")];
+const hideValue = () => hideBoxes().filter((b) => b.checked).map((b) => b.value).join(",");
 
 function readHash() {
   const h = new URLSearchParams(location.hash.replace(/^#/, ""));
   if (![...h.keys()].length) return false;
   for (const f of FIELDS) if (h.has(f)) $(f).value = h.get(f);
+  if (h.has("hide")) {
+    const on = new Set(h.get("hide").split(","));
+    for (const b of hideBoxes()) b.checked = on.has(b.value);
+  }
   return true;
 }
 
@@ -111,6 +131,7 @@ function writeHash(push) {
     if (f === "q" && view === "top") continue;
     h.set(f, $(f).value.trim());
   }
+  h.set("hide", hideValue());
   const next = "#" + h.toString();
   if (next === location.hash) return;
   if (push) history.pushState(null, "", next); else history.replaceState(null, "", next);
@@ -123,12 +144,13 @@ async function draw({ push = true } = {}) {
   writeHash(push);
 
   const t = encodeURIComponent(q);
-  const url =
+  const hide = `&hide=${hideValue()}`;
+  const url = (
     view === "top" ? `api/view/top?limit=${limit}`
     : view === "category" ? `api/view/category?title=${t}&limit=${limit}&depth=3`
     : view === "path" ? `api/view/path?from=${t}&to=${encodeURIComponent($("q2").value.trim())}&limit=${limit}`
     : `api/view/neighborhood?title=${t}&limit=${limit}&hops=${$("hops").value}` +
-      `&direction=${view === "neighborhood" ? "both" : view}`;
+      `&direction=${view === "neighborhood" ? "both" : view}`) + hide;
 
   status("querying…");
   const t0 = performance.now();
@@ -186,7 +208,7 @@ const typeahead = (el) => () => {
   searchTimer = setTimeout(async () => {
     const v = el.value.trim();
     if (v.length < 2 || $("view").value === "category") return;
-    const hits = await (await fetch(`api/search?q=${encodeURIComponent(v)}`)).json();
+    const hits = await (await fetch(`api/search?q=${encodeURIComponent(v)}&hide=${hideValue()}`)).json();
     $("hits").innerHTML = hits
       .map((h) => `<option value="${h.title.replace(/_/g, " ")}">`).join("");
   }, 180);
@@ -206,6 +228,12 @@ $("view").addEventListener("change", syncControls);
 $("go").addEventListener("click", draw);
 for (const id of ["q", "q2"]) {
   $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") draw(); });
+}
+
+for (const b of hideBoxes()) {
+  const n = info.kinds?.[b.value];
+  if (n !== undefined) b.parentElement.title = `${n.toLocaleString()} pages`;
+  b.addEventListener("change", () => draw());
 }
 
 readHash();
