@@ -146,13 +146,20 @@ say `/kiwix` out of the box.
 
 ### The reading layer
 
-Download a ZIM from [the Kiwix library](https://download.kiwix.org/zim/wikipedia/) into
-`/media/vault/WikiGraph/zim/`, set `ZIM_BOOK` to its filename without the `.zim`, and
-start the profile:
+Fetch a ZIM from [the Kiwix library](https://download.kiwix.org/zim/wikipedia/), set
+`ZIM_BOOK` to its name, and start the profile:
 
 ```bash
+./fetch-zim.sh wikipedia_en_all_maxi_2026-08 /media/vault/WikiGraph/zim
 docker compose --profile kiwix up -d
 ```
+
+The script resumes an interrupted download (`curl -C -`, with retries) and checks the
+published SHA-256 when it finishes. Both matter at 119 GB: a dropped connection should
+cost nothing, and a truncated ZIM does not fail loudly — `kiwix-serve` opens it and some
+articles just come back wrong. Kiwix also publishes `.torrent` and `.magnet` files beside
+each ZIM and recommends them for files this size; if you go that way, the checksum is at
+`<name>.zim.sha256` on the same server.
 
 The profile matters: a plain `up -d` does not start Kiwix, and Caddy answers every
 "read the article" click with a 502 until it is running.
