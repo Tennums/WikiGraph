@@ -5011,6 +5011,9 @@ function mountVaultGraph(root, data, deps) {
     // in Obsidian, this page opens the article in Kiwix. `deps.articleHref(label)`
     // returns the URL, or nothing to drop the button entirely.
     var openHref = typeof deps.articleHref === "function" ? deps.articleHref(a.label) : "";
+    // Likewise "draw around this": the host decides what a new centre means (here, a
+    // fresh neighbourhood query). Absent, no button.
+    var canRecenter = typeof deps.onRecenter === "function" && !a.ghost;
     var file = encodeURIComponent(a.path.replace(/\.md$/, ""));
 
     var h = '<button class="x" title="Close">&times;</button>' +
@@ -5032,6 +5035,8 @@ function mountVaultGraph(root, data, deps) {
         '<button class="btn pin" data-pin="' + id + '" aria-pressed="' + isPinned(id) + '" title="' +
           (isPinned(id) ? "Unpin from hub" : "Pin to hub") + '">' + pinSvg(isPinned(id)) +
           ' Pin to hub</button>' +
+        (canRecenter ? '<button class="btn recenter" title="Redraw the disc with this article at the centre">' +
+          '&#8982; Draw around this</button>' : "") +
       '</div>';
 
     if (nb.length) {
@@ -5052,6 +5057,8 @@ function mountVaultGraph(root, data, deps) {
     d.setAttribute("aria-label", a.label);
     d.querySelector(".x").onclick = function () { select(null); };
     d.querySelector(".pin").onclick = function () { togglePin(id); select(id); };
+    var rc = d.querySelector(".recenter");
+    if (rc) rc.onclick = function () { deps.onRecenter(a.label); };
     Array.prototype.forEach.call(d.querySelectorAll("[data-go]"), /** @param {HTMLElement} b */ function (b) {
       b.onclick = function () { goTo(b.getAttribute("data-go")); };
     });

@@ -6,9 +6,10 @@ This directory started as a verbatim copy of
 from `src/engine/` with esbuild. That verbatim import is commit `afcc942` in this repository.
 
 It is no longer verbatim. The user-facing vocabulary has been changed from Obsidian's
-(vault, note, folder) to Wikipedia's (wiki, article, topic), and the detail card's open
-button takes its target from a `deps.articleHref` callback instead of a hardcoded
-`obsidian://` URL. Layout, rendering and interaction are untouched.
+(vault, note, folder) to Wikipedia's (wiki, article, topic), and the detail card gained
+two host callbacks: `deps.articleHref(label)` supplies the open button's target instead
+of a hardcoded `obsidian://` URL, and `deps.onRecenter(label)` adds a "Draw around this"
+button when present. Layout, rendering and interaction are untouched.
 
 ## Pulling in an upstream release
 

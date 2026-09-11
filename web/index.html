@@ -86,10 +86,41 @@ try {
 // of a build step.
 const markup = await (await fetch("vendor/page.html")).text();
 
-async function draw() {
+/**
+ * The controls are the state, and the URL hash mirrors them -- so any view can be
+ * bookmarked, sent to someone, or stepped back through with the browser's own back
+ * button. The hash rather than the query string: it never reaches the server, so a
+ * shared link is just a link and the API stays cacheable by path.
+ */
+const FIELDS = ["view", "q", "q2", "limit", "hops"];
+
+function readHash() {
+  const h = new URLSearchParams(location.hash.replace(/^#/, ""));
+  if (![...h.keys()].length) return false;
+  for (const f of FIELDS) if (h.has(f)) $(f).value = h.get(f);
+  return true;
+}
+
+function writeHash(push) {
+  const h = new URLSearchParams();
+  const view = $("view").value;
+  for (const f of FIELDS) {
+    // Only what the view actually uses, so the link says what it shows.
+    if (f === "q2" && view !== "path") continue;
+    if (f === "hops" && !["neighborhood", "in", "out"].includes(view)) continue;
+    if (f === "q" && view === "top") continue;
+    h.set(f, $(f).value.trim());
+  }
+  const next = "#" + h.toString();
+  if (next === location.hash) return;
+  if (push) history.pushState(null, "", next); else history.replaceState(null, "", next);
+}
+
+async function draw({ push = true } = {}) {
   const view = $("view").value;
   const q = $("q").value.trim();
   const limit = $("limit").value;
+  writeHash(push);
 
   const t = encodeURIComponent(q);
   const url =
@@ -131,6 +162,15 @@ async function draw() {
     // A path view pins its chain to the hub -- upstream's own "pin to hub" feature,
     // which is exactly the right place for the one thing the view is about.
     pinned: data.path ?? [],
+    // "Draw around this" on the card: a new neighbourhood with that article as the
+    // seed. This is what turns a picture into a walk -- each click is a page in the
+    // history, so the back button retraces it.
+    onRecenter: (label) => {
+      $("view").value = "neighborhood";
+      $("q").value = label;
+      syncControls();
+      draw();
+    },
   });
   const drawn = Math.round(performance.now() - t1);
 
@@ -168,8 +208,14 @@ for (const id of ["q", "q2"]) {
   $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") draw(); });
 }
 
+readHash();
 syncControls();
-draw();
+draw({ push: false });
+
+// Back and forward re-read the hash and redraw, without pushing again.
+window.addEventListener("popstate", () => {
+  if (readHash()) { syncControls(); draw({ push: false }); }
+});
 </script>
 </body>
 </html>

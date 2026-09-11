@@ -29,6 +29,11 @@ thousand articles chosen for a reason:
 | **Category tree** | everything under a category, N levels deep | direct subcategories |
 | **Most linked-to** | the top articles by in-degree | subject area |
 
+Every view is a URL. The controls mirror into the hash —
+`#view=path&q=Cheese&q2=Black+hole&limit=1000` — so a view can be bookmarked or sent,
+and the browser's back button retraces a walk. The detail card's **Draw around this**
+makes the article the new centre; each click is a page in the history.
+
 **In-degree is the importance signal throughout** — how the disc ranks a BFS frontier, a
 search hit, and the "most linked-to" list. Out-degree measures how much an article lists,
 and lists win it: by out-degree simplewiki's top articles are `List of municipalities in

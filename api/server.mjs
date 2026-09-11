@@ -74,7 +74,13 @@ async function serveStatic(url, res) {
   }
   try {
     const body = await readFile(path);
-    res.writeHead(200, { "content-type": MIME[extname(path)] ?? "application/octet-stream" });
+    res.writeHead(200, {
+      "content-type": MIME[extname(path)] ?? "application/octet-stream",
+      // Revalidate every time. The files are small and served from the container's
+      // own disk, and without this a browser keeps the previous page.js for days after
+      // a rebuild -- a new feature "not working" that is really an old bundle.
+      "cache-control": "no-cache",
+    });
     res.end(body);
   } catch {
     res.writeHead(404).end("not found");
