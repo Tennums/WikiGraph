@@ -157,7 +157,10 @@ function watchDetail() {
     if (!info.reader) { a.remove(); return; }
     const title = card.querySelector("h2, h3, .title")?.textContent?.trim();
     if (!title) return;
-    a.href = `${info.reader}/A/${encodeURIComponent(title.replace(/ /g, "_"))}`;
+    // No `/A/` namespace: ZIMs built since 2021 put articles at /content/<book>/<Title>
+    // directly. kiwix-serve still answers the old /A/ form with a redirect, but that
+    // is a compatibility shim, not the address.
+    a.href = `${info.reader}/${encodeURIComponent(title.replace(/ /g, "_"))}`;
     a.target = "_blank";
     a.rel = "noopener";
     a.textContent = "Read the article →";

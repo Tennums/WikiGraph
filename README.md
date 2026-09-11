@@ -166,7 +166,7 @@ The profile matters: a plain `up -d` does not start Kiwix, and Caddy answers eve
 
 `ZIM_BOOK` does double duty. The compose file hands `/zim/<ZIM_BOOK>.zim` straight to
 `kiwix-serve` — no `library.xml`, no `kiwix-manage` step — and the API builds article
-links as `<KIWIX_URL>/content/<ZIM_BOOK>/A/<Article_Title>`. Kiwix derives the book name
+links as `<KIWIX_URL>/content/<ZIM_BOOK>/<Article_Title>`. Kiwix derives the book name
 from the filename (lowercased, no extension), so the two agree by construction; the
 filenames from the Kiwix library are already lowercase.
 

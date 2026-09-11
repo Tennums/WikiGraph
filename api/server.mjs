@@ -67,7 +67,7 @@ const server = createServer(async (req, res) => {
         return json(res, 200, {
           ...graph.meta,
           maxNodes: MAX_NODES,
-          // kiwix-serve exposes an article at /content/<book>/A/<Title>. The book name
+          // kiwix-serve exposes an article at /content/<book>/<Title>. The book name
           // is the ZIM's filename without its extension.
           reader: KIWIX_URL && KIWIX_BOOK ? `${KIWIX_URL}/content/${KIWIX_BOOK}` : null,
         });
