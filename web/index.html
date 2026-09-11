@@ -37,12 +37,17 @@
 
   <label for="view">View</label>
   <select id="view">
-    <option value="top">Best connected</option>
     <option value="neighborhood" selected>Around an article</option>
+    <option value="in">What links here</option>
+    <option value="out">What it links to</option>
+    <option value="path">Path between two</option>
     <option value="category">Category tree</option>
+    <option value="top">Most linked-to</option>
   </select>
 
   <input type="text" id="q" list="hits" placeholder="Physics" value="Physics">
+  <label for="q2" id="q2Label" hidden>→</label>
+  <input type="text" id="q2" list="hits" placeholder="Napoleon" value="Napoleon" hidden>
   <datalist id="hits"></datalist>
 
   <label for="limit">Nodes</label>
@@ -86,10 +91,13 @@ async function draw() {
   const q = $("q").value.trim();
   const limit = $("limit").value;
 
+  const t = encodeURIComponent(q);
   const url =
     view === "top" ? `api/view/top?limit=${limit}`
-    : view === "category" ? `api/view/category?title=${encodeURIComponent(q)}&limit=${limit}&depth=3`
-    : `api/view/neighborhood?title=${encodeURIComponent(q)}&limit=${limit}&hops=${$("hops").value}`;
+    : view === "category" ? `api/view/category?title=${t}&limit=${limit}&depth=3`
+    : view === "path" ? `api/view/path?from=${t}&to=${encodeURIComponent($("q2").value.trim())}&limit=${limit}`
+    : `api/view/neighborhood?title=${t}&limit=${limit}&hops=${$("hops").value}` +
+      `&direction=${view === "neighborhood" ? "both" : view}`;
 
   status("querying…");
   const t0 = performance.now();
@@ -120,36 +128,45 @@ async function draw() {
     // configured) makes the page omit the button rather than draw a dead one.
     articleHref: (label) =>
       info.reader ? `${info.reader}/${encodeURIComponent(label.replace(/ /g, "_"))}` : "",
+    // A path view pins its chain to the hub -- upstream's own "pin to hub" feature,
+    // which is exactly the right place for the one thing the view is about.
+    pinned: data.path ?? [],
   });
   const drawn = Math.round(performance.now() - t1);
 
-  status(`${data.nodes.length.toLocaleString()} articles · ` +
+  status((data.pathTitles ? data.pathTitles.join(" → ") + " · " : "") +
+         `${data.nodes.length.toLocaleString()} articles · ` +
          `${data.edges.length.toLocaleString()} links · ${queried}ms query · ${drawn}ms draw`);
 }
 
-// Typeahead straight off the title index.
+// Typeahead straight off the title index, shared by both inputs.
 let searchTimer;
-$("q").addEventListener("input", () => {
+const typeahead = (el) => () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(async () => {
-    const v = $("q").value.trim();
+    const v = el.value.trim();
     if (v.length < 2 || $("view").value === "category") return;
     const hits = await (await fetch(`api/search?q=${encodeURIComponent(v)}`)).json();
     $("hits").innerHTML = hits
       .map((h) => `<option value="${h.title.replace(/_/g, " ")}">`).join("");
   }, 180);
-});
+};
+$("q").addEventListener("input", typeahead($("q")));
+$("q2").addEventListener("input", typeahead($("q2")));
 
 const syncControls = () => {
   const view = $("view").value;
   $("q").disabled = view === "top";
-  const nbhd = view === "neighborhood";
+  const nbhd = ["neighborhood", "in", "out"].includes(view);
   $("hops").hidden = $("hopsLabel").hidden = !nbhd;
+  $("q2").hidden = $("q2Label").hidden = view !== "path";
   $("q").placeholder = view === "category" ? "Physics (category name)" : "Physics";
 };
 $("view").addEventListener("change", syncControls);
 $("go").addEventListener("click", draw);
-$("q").addEventListener("keydown", (e) => { if (e.key === "Enter") draw(); });
+for (const id of ["q", "q2"]) {
+  $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") draw(); });
+}
 
 syncControls();
 draw();

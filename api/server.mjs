@@ -26,13 +26,16 @@ const MAX_NODES = Number(process.env.MAX_NODES ?? 6000);
 // missing graph: it is WIKI falling back to its default because .env is absent -- a
 // fresh clone has no .env, since it is deliberately untracked -- and an ENOENT for
 // simplewiki.csr says nothing about that while the enwiki graph sits right beside it.
-for (const ext of ["csr", "db"]) {
+for (const ext of ["csr", "rcsr", "db"]) {
   const want = join(GRAPH_DIR, `${WIKI}.${ext}`);
   if (existsSync(want)) continue;
   const have = existsSync(GRAPH_DIR)
-    ? readdirSync(GRAPH_DIR).filter((f) => /\.(csr|db)$/.test(f)).sort()
+    ? readdirSync(GRAPH_DIR).filter((f) => /\.(csr|rcsr|db)$/.test(f)).sort()
     : [];
-  const hint = have.length
+  const hint = ext === "rcsr" && have.includes(`${WIKI}.csr`)
+    ? `the in-link graph is missing; derive it from the existing .csr with\n  ` +
+      `docker compose --profile ingest run --rm ingest --wiki ${WIKI} --reverse-only`
+    : have.length
     ? `${GRAPH_DIR} holds: ${have.join(", ")} -- is WIKI set in .env? ` +
       `(WIKI is "${WIKI}"${process.env.WIKI ? "" : ", the default: no WIKI in the environment"})`
     : `${GRAPH_DIR} holds no graph at all -- run the ingest first, ` +
@@ -41,7 +44,8 @@ for (const ext of ["csr", "db"]) {
   process.exit(1);
 }
 
-const graph = new WikiGraph(join(GRAPH_DIR, `${WIKI}.csr`), join(GRAPH_DIR, `${WIKI}.db`));
+const graph = new WikiGraph(join(GRAPH_DIR, `${WIKI}.csr`), join(GRAPH_DIR, `${WIKI}.rcsr`),
+                            join(GRAPH_DIR, `${WIKI}.db`));
 console.log(`wikigraph: ${WIKI} — ${graph.n.toLocaleString()} articles, ` +
             `${graph.m.toLocaleString()} links`);
 
@@ -101,11 +105,45 @@ const server = createServer(async (req, res) => {
         if (seed < 0) return json(res, 404, { error: `no article "${q.get("title")}"` });
         const limit = budget(q.get("limit"), 3000);
         const hops = Math.max(1, Math.min(4, Number(q.get("hops")) || 2));
-        const sel = graph.neighborhood(seed, { hops, limit });
-        const title = graph.db.prepare("SELECT title FROM node WHERE idx = ?").get(seed).title;
-        return json(res, 200, graph.toVaultData(sel.ids, {
-          title: String(title).replace(/_/g, " "), depth: sel.depth,
-        }));
+        const direction = ["in", "out", "both"].includes(q.get("direction"))
+          ? q.get("direction") : "both";
+        const sel = graph.neighborhood(seed, { hops, limit, direction });
+        const name = graph.titleOf(seed).replace(/_/g, " ");
+        const title = direction === "in" ? `What links to ${name}`
+                    : direction === "out" ? `What ${name} links to` : name;
+        return json(res, 200, graph.toVaultData(sel.ids, { title, depth: sel.depth }));
+      }
+
+      /* The shortest chain of links between two articles, drawn in context: the path
+         itself is pinned to the hub, and each of its articles brings a slice of its
+         own neighbourhood so the disc shows what the chain passes through. */
+      case "/api/view/path": {
+        const a = graph.lookup(q.get("from") ?? "");
+        const b = graph.lookup(q.get("to") ?? "");
+        if (a < 0) return json(res, 404, { error: `no article "${q.get("from")}"` });
+        if (b < 0) return json(res, 404, { error: `no article "${q.get("to")}"` });
+        const t0 = Date.now();
+        const path = graph.path(a, b);
+        if (!path) return json(res, 404, { error: "no link path found within 8 hops" });
+        const limit = budget(q.get("limit"), 2500);
+        const onPath = new Set(path);
+        const ids = [...path];
+        // Share the budget across the chain so a hub on the path cannot crowd out
+        // the rest of it.
+        const per = Math.max(20, Math.floor((limit - path.length) / path.length));
+        for (const u of path) {
+          const near = graph.neighborhood(u, { hops: 1, limit: per + 1, direction: "both" });
+          for (const v of near.ids) if (!onPath.has(v) && ids.length < limit) { ids.push(v); onPath.add(v); }
+        }
+        const names = path.map((i) => graph.titleOf(i).replace(/_/g, " "));
+        const data = graph.toVaultData(ids, {
+          title: `${names[0]} → ${names[names.length - 1]} (${path.length - 1} hops)`,
+          typeOf: (id) => path.includes(id) ? `step ${path.indexOf(id)} of ${path.length - 1}` : "along the path",
+        });
+        data.path = path.map(String);
+        data.pathTitles = names;
+        data.pathMs = Date.now() - t0;
+        return json(res, 200, data);
       }
 
       case "/api/view/category": {

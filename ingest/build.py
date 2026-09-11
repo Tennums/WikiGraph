@@ -102,6 +102,62 @@ def dump(wiki: str, table: str, d: Path) -> str:
     )
 
 
+MAGIC = 0x57474B31  # "WGK1"
+HEADER = 32         # 4 x int64: magic, version, n, m
+
+
+def write_reverse(csr: Path, rcsr: Path) -> None:
+    """Derive the in-link CSR from the out-link one.
+
+    The forward file already is the complete edge list, so the transpose never touches a
+    dump: it is what lets the reverse graph be added to an existing build in minutes.
+
+    Same counting-sort placement as the forward build, in blocks, and for the same
+    reason -- an argsort over enwiki's 712M edges wants ~6 GB of int64 indices on top of
+    the arrays themselves, where this needs the output array and a cursor. Walking the
+    forward CSR visits sources in increasing order, so each target's sources arrive
+    sorted and the result has the same sorted-unique property as the forward file.
+    """
+    head = np.fromfile(csr, dtype=np.int64, count=4)
+    if int(head[0]) != MAGIC:
+        sys.exit(f"{csr} is not a wikigraph CSR (bad magic)")
+    n, m = int(head[2]), int(head[3])
+    offsets = np.fromfile(csr, dtype=np.int64, count=n + 1, offset=HEADER)
+    # Memory-mapped: enwiki's targets are 2.9 GB and are read once, sequentially.
+    targets = np.memmap(csr, dtype=np.int32, mode="r",
+                        offset=HEADER + 8 * (n + 1), shape=(m,))
+
+    log(f"transposing {csr.name}: {n:,} articles, {m:,} links ...")
+    indeg = np.bincount(targets, minlength=n).astype(np.int64)
+    roff = np.zeros(n + 1, dtype=np.int64)
+    np.cumsum(indeg, out=roff[1:])
+    rtargets = np.empty(m, dtype=np.int32)
+    cursor = roff[:n].copy()
+
+    outdeg = np.diff(offsets)
+    block = 1 << 22
+    for a in range(0, m, block):
+        b = min(a + block, m)
+        dst = np.asarray(targets[a:b])
+        # Which source each edge in [a, b) belongs to: the article whose slice spans it.
+        src = (np.searchsorted(offsets, np.arange(a, b), side="right") - 1).astype(np.int32)
+        order = np.argsort(dst, kind="stable")
+        d_sorted = dst[order]
+        starts = np.r_[0, np.flatnonzero(np.diff(d_sorted)) + 1]
+        group_len = np.diff(np.r_[starts, d_sorted.size])
+        rank = np.arange(d_sorted.size) - np.repeat(starts, group_len)
+        rtargets[cursor[d_sorted] + rank] = src[order]
+        cursor += np.bincount(dst, minlength=n)
+    del outdeg
+
+    with open(rcsr, "wb") as fh:
+        np.array([MAGIC, 1, n, m], dtype=np.int64).tofile(fh)
+        roff.tofile(fh)
+        rtargets.tofile(fh)
+    log(f"wrote {rcsr} ({rcsr.stat().st_size / 1e9:.2f} GB); "
+        f"max in-degree {int(indeg.max()):,}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--wiki", default="simplewiki", help="e.g. simplewiki, enwiki")
@@ -114,6 +170,9 @@ def main() -> None:
     ap.add_argument("--meta-only", action="store_true",
                     help="reuse the existing .csr and rebuild only the .db -- skips "
                          "the pagelinks pass, which is over half the run")
+    ap.add_argument("--reverse-only", action="store_true",
+                    help="derive the in-link .rcsr from an existing .csr and stop; "
+                         "reads no dumps, touches no database")
     ap.add_argument("--topic-root", default="",
                     help="category whose children become the wedges "
                          "(default: Main_topic_classifications, then Articles)")
@@ -123,6 +182,13 @@ def main() -> None:
                     help="drop articles shorter than this many bytes (stub filter)")
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
+
+    if args.reverse_only:
+        csr = args.out / f"{args.wiki}.csr"
+        if not csr.exists():
+            sys.exit(f"--reverse-only needs an existing {csr}")
+        write_reverse(csr, args.out / f"{args.wiki}.rcsr")
+        return
 
     tmp = args.tmpdir or Path(tempfile.gettempdir())
     if tmp.exists() and not tmp.is_dir():
@@ -333,10 +399,16 @@ def main() -> None:
         with open(csr, "wb") as fh:
             # A tiny header so the API can validate what it mapped instead of trusting
             # the filename.
-            np.array([0x57474B31, 1, n, write], dtype=np.int64).tofile(fh)  # "WGK1"
+            np.array([MAGIC, 1, n, write], dtype=np.int64).tofile(fh)
             offsets.astype(np.int64).tofile(fh)
             targets.astype(np.int32).tofile(fh)
         log(f"wrote {csr} ({csr.stat().st_size / 1e9:.2f} GB)")
+
+    # A fresh forward build always gets a fresh reverse; a reused one only if the
+    # reverse is missing, so --meta-only on an older build fills the gap once.
+    rcsr = args.out / f"{args.wiki}.rcsr"
+    if not args.meta_only or not rcsr.exists():
+        write_reverse(csr, rcsr)
 
     # ------------------------------------------------------------ 6. categories
     log("reading categorylinks ...")

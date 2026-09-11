@@ -22,19 +22,33 @@ thousand articles chosen for a reason:
 
 | View | Selection | Wedges |
 |---|---|---|
-| **Around an article** | breadth-first from a seed, best-connected first | subject area |
+| **Around an article** | breadth-first along links in both directions, most linked-to first | subject area |
+| **What links here** | the same, following in-links only | subject area |
+| **What it links to** | the same, following out-links only | subject area |
+| **Path between two** | the shortest chain of links, pinned to the hub, each step with a slice of its neighbourhood | subject area |
 | **Category tree** | everything under a category, N levels deep | direct subcategories |
-| **Best connected** | the top articles by degree | subject area |
+| **Most linked-to** | the top articles by in-degree | subject area |
 
-Degree is recomputed over each selection rather than taken globally: the disc rings
-articles by the links it can actually see, and a global degree would pull articles to the
-centre for links to nodes that are not on screen.
+**In-degree is the importance signal throughout** — how the disc ranks a BFS frontier, a
+search hit, and the "most linked-to" list. Out-degree measures how much an article lists,
+and lists win it: by out-degree simplewiki's top articles are `List of municipalities in
+Switzerland` and `Deaths in 2024`. By in-degree they are `United States` and `France`.
+
+Degree *on the disc* is recomputed over each selection rather than taken globally: the
+disc rings articles by the links it can actually see, and a global degree would pull
+articles to the centre for links to nodes that are not on screen.
+
+The path search is bidirectional — forward along out-links, backward along in-links,
+always growing the smaller side. Wikipedia's link graph has a diameter of a few hops but
+hubs with a million in-links; meeting in the middle keeps both frontiers to a few thousand
+articles, and a path across simplewiki takes about 5 ms.
 
 ## Architecture
 
 ```
-SQL dumps ──► ingest/build.py ──► <wiki>.csr  ─┐
-                                  <wiki>.db   ─┴─► api/server.mjs ──► web/ (the disc)
+SQL dumps ──► ingest/build.py ──► <wiki>.csr   ─┐  out-links
+                                  <wiki>.rcsr  ─┤  in-links (transposed from .csr)
+                                  <wiki>.db    ─┴─► api/server.mjs ──► web/ (the disc)
                                                           │
 ZIM file  ──► kiwix-serve ◄───────────────────────────────┘  "read the article"
 ```
@@ -49,7 +63,18 @@ all of MediaWiki. Neither is necessary when you run both.
 
 A CSR (compressed sparse row) binary: a header, one 64-bit offset per article, then the
 neighbour lists end to end. Neighbours of article `i` are `targets[offsets[i]:offsets[i+1]]`
-— one seek, no index, no query planner.
+— one seek, no index, no query planner. There are two: `.csr` holds out-links, `.rcsr` the
+same edges transposed, so "who links here" is the same single seek in the other file.
+
+The reverse file is derived from the forward one, never from the dumps, so it can be added
+to an existing build without rereading anything:
+
+```bash
+docker compose --profile ingest run --rm ingest --wiki enwiki --reverse-only
+```
+
+A full build and `--meta-only` both produce it as a matter of course; the API refuses to
+start without it and prints that command.
 
 The API reads it with positioned reads rather than loading it. enwiki's target array runs
 to several GB, past what a single Node `Buffer` can hold, and the OS page cache already
@@ -65,7 +90,7 @@ All state lives on the NAS under `DATA_DIR`; the containers hold nothing of thei
 ```
 /media/vault/WikiGraph/
 ├── dumps/     enwiki-latest-*.sql.gz     (input, mounted read-only)
-├── graph/     enwiki.csr, enwiki.db      (built once, then read-only)
+├── graph/     enwiki.csr, .rcsr, .db     (built once, then read-only)
 └── zim/       <ZIM_BOOK>.zim              (Kiwix)
 ```
 

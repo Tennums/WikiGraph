@@ -20,31 +20,79 @@ import { DatabaseSync } from "node:sqlite";
 const MAGIC = 0x57474b31; // "WGK1"
 const HEADER = 32; // 4 x int64
 
-export class WikiGraph {
-  /** @param {string} csrPath @param {string} dbPath */
-  constructor(csrPath, dbPath) {
-    this.fd = openSync(csrPath, "r");
-
+/**
+ * One direction of the graph: a CSR file opened for positioned reads.
+ *
+ * Only the offset array is resident (8 bytes per article, 56 MB at enwiki scale). The
+ * neighbour lists -- several GB for enwiki -- stay on disk and come in through the OS
+ * page cache one slice at a time, which is what a neighbourhood query needs anyway.
+ */
+class Csr {
+  constructor(path) {
+    this.path = path;
+    this.fd = openSync(path, "r");
     const head = Buffer.allocUnsafe(HEADER);
     readSync(this.fd, head, 0, HEADER, 0);
     if (Number(head.readBigInt64LE(0)) !== MAGIC) {
-      throw new Error(`${csrPath} is not a wikigraph CSR (bad magic)`);
+      throw new Error(`${path} is not a wikigraph CSR (bad magic)`);
     }
     this.n = Number(head.readBigInt64LE(16));
     this.m = Number(head.readBigInt64LE(24));
 
     const offBytes = 8 * (this.n + 1);
     const expect = HEADER + offBytes + 4 * this.m;
-    const actual = statSync(csrPath).size;
+    const actual = statSync(path).size;
     if (actual !== expect) {
-      throw new Error(`${csrPath} is truncated: ${actual} bytes, expected ${expect}`);
+      throw new Error(`${path} is truncated: ${actual} bytes, expected ${expect}`);
     }
-
-    // Resident. Everything else is paged in on demand.
     const off = Buffer.allocUnsafe(offBytes);
     readSync(this.fd, off, 0, offBytes, HEADER);
     this.offsets = new BigInt64Array(off.buffer, off.byteOffset, this.n + 1);
-    this.targetBase = HEADER + offBytes;
+    this.base = HEADER + offBytes;
+  }
+
+  close() { closeSync(this.fd); }
+
+  degree(idx) {
+    return Number(this.offsets[idx + 1] - this.offsets[idx]);
+  }
+
+  /** Neighbours of `idx`, as stored: sorted and unique. */
+  neighbours(idx) {
+    if (idx < 0 || idx >= this.n) return new Int32Array(0);
+    const a = this.offsets[idx], b = this.offsets[idx + 1];
+    const count = Number(b - a);
+    if (count === 0) return new Int32Array(0);
+    const buf = Buffer.allocUnsafe(count * 4);
+    readSync(this.fd, buf, 0, count * 4, this.base + Number(a) * 4);
+    return new Int32Array(buf.buffer, buf.byteOffset, count);
+  }
+
+  /** Every node's degree as one typed array, from the offsets alone. */
+  degrees() {
+    const d = new Int32Array(this.n);
+    for (let i = 0; i < this.n; i++) d[i] = Number(this.offsets[i + 1] - this.offsets[i]);
+    return d;
+  }
+}
+
+export class WikiGraph {
+  /** @param {string} csrPath @param {string} rcsrPath @param {string} dbPath */
+  constructor(csrPath, rcsrPath, dbPath) {
+    this.out = new Csr(csrPath);   // who this article links to
+    this.in = new Csr(rcsrPath);   // who links to this article
+    if (this.in.n !== this.out.n || this.in.m !== this.out.m) {
+      throw new Error(`${rcsrPath} does not match ${csrPath} -- rebuild with --reverse-only`);
+    }
+    this.n = this.out.n;
+    this.m = this.out.m;
+
+    // In-degree is the importance signal everywhere below: what the disc rings by,
+    // what "best connected" means, how a search hit or a BFS frontier is ranked.
+    // Out-degree measures how much an article lists, and lists win it; in-degree
+    // measures how much the rest of the wiki refers to it.
+    this.indeg = this.in.degrees();
+    this._topOrder = null;
 
     this.db = new DatabaseSync(dbPath, { readOnly: true });
     this.meta = Object.fromEntries(
@@ -54,23 +102,12 @@ export class WikiGraph {
 
   close() {
     this.db.close();
-    closeSync(this.fd);
+    this.out.close();
+    this.in.close();
   }
 
-  /** Out-neighbours of `idx`, as stored: sorted and unique. */
-  neighbours(idx) {
-    if (idx < 0 || idx >= this.n) return new Int32Array(0);
-    const a = this.offsets[idx], b = this.offsets[idx + 1];
-    const count = Number(b - a);
-    if (count === 0) return new Int32Array(0);
-    const buf = Buffer.allocUnsafe(count * 4);
-    readSync(this.fd, buf, 0, count * 4, this.targetBase + Number(a) * 4);
-    return new Int32Array(buf.buffer, buf.byteOffset, count);
-  }
-
-  degree(idx) {
-    return Number(this.offsets[idx + 1] - this.offsets[idx]);
-  }
+  /** Out-neighbours; kept under the old name because toVaultData draws edges from it. */
+  neighbours(idx) { return this.out.neighbours(idx); }
 
   /** Resolve a human title ("Isaac Newton" or "Isaac_Newton") to a node index. */
   lookup(title) {
@@ -83,11 +120,26 @@ export class WikiGraph {
     return row ? Number(row.idx) : -1;
   }
 
+  titleOf(idx) {
+    const r = this.db.prepare("SELECT title FROM node WHERE idx = ?").get(idx);
+    return r ? String(r.title) : String(idx);
+  }
+
+  /**
+   * Prefix search, ranked by in-degree.
+   *
+   * The database only indexes out-degree, so it is asked for a wider net and the
+   * re-ranking happens here -- cheaper than a schema change, and it means the graph
+   * files alone decide what "important" means.
+   */
   search(q, limit = 20) {
-    return this.db
-      .prepare("SELECT idx, title, deg FROM node WHERE title LIKE ? ORDER BY deg DESC LIMIT ?")
-      .all(String(q).trim().replace(/ /g, "_") + "%", limit)
-      .map((r) => ({ idx: Number(r.idx), title: String(r.title), deg: Number(r.deg) }));
+    const rows = this.db
+      .prepare("SELECT idx, title FROM node WHERE title LIKE ? LIMIT ?")
+      .all(String(q).trim().replace(/ /g, "_") + "%", Math.max(200, limit * 10));
+    return rows
+      .map((r) => ({ idx: Number(r.idx), title: String(r.title), deg: this.indeg[Number(r.idx)] }))
+      .sort((a, b) => b.deg - a.deg)
+      .slice(0, limit);
   }
 
   // ------------------------------------------------------------------- selections
@@ -99,17 +151,27 @@ export class WikiGraph {
    *
    * Plain BFS from a well-linked article overshoots the budget on the first hop and
    * fills the disc with whatever happened to be scanned first. Ordering each frontier
-   * by degree instead means the budget is spent on the articles that carry the
-   * neighbourhood's structure, and the result is stable across runs.
+   * by in-degree instead means the budget is spent on the articles the rest of the
+   * wiki cares about, and the result is stable across runs.
+   *
+   * `direction` is which links to follow: "out" (what this article cites), "in" (what
+   * cites it -- "what links here"), or "both".
    */
-  neighborhood(seed, { hops = 2, limit = 3000 } = {}) {
+  neighborhood(seed, { hops = 2, limit = 3000, direction = "both" } = {}) {
+    const expand = (u) => {
+      if (direction === "out") return [this.out.neighbours(u)];
+      if (direction === "in") return [this.in.neighbours(u)];
+      return [this.out.neighbours(u), this.in.neighbours(u)];
+    };
     const seen = new Map([[seed, 0]]);
     let frontier = [seed];
     for (let h = 1; h <= hops && seen.size < limit; h++) {
       const next = new Map();
       for (const u of frontier) {
-        for (const v of this.neighbours(u)) {
-          if (!seen.has(v) && !next.has(v)) next.set(v, this.degree(v));
+        for (const list of expand(u)) {
+          for (const v of list) {
+            if (!seen.has(v) && !next.has(v)) next.set(v, this.indeg[v]);
+          }
         }
       }
       const room = limit - seen.size;
@@ -119,6 +181,50 @@ export class WikiGraph {
       if (!frontier.length) break;
     }
     return { ids: [...seen.keys()], depth: seen, seed };
+  }
+
+  /**
+   * Shortest link path from `a` to `b`: the "six degrees of Wikipedia" question.
+   *
+   * Bidirectional: forward from `a` along out-links, backward from `b` along in-links,
+   * always growing the smaller side. Wikipedia's link graph has a diameter of a few
+   * hops but hubs with a million in-links, so a one-sided search from a popular
+   * target would read most of the graph; meeting in the middle keeps both frontiers
+   * to a few thousand articles. Returns the path as node ids, or null.
+   */
+  path(a, b, { maxDepth = 8, maxVisited = 4_000_000 } = {}) {
+    if (a === b) return [a];
+    const fwd = new Map([[a, -1]]);   // node -> parent towards a
+    const bwd = new Map([[b, -1]]);   // node -> parent towards b
+    let fFront = [a], bFront = [b];
+
+    const meet = (x) => {
+      const left = [];
+      for (let u = x; u !== -1; u = fwd.get(u)) left.push(u);
+      left.reverse();
+      const right = [];
+      for (let u = bwd.get(x); u !== -1 && u !== undefined; u = bwd.get(u)) right.push(u);
+      return left.concat(right);
+    };
+
+    for (let d = 0; d < maxDepth; d++) {
+      if (!fFront.length || !bFront.length) return null;
+      if (fwd.size + bwd.size > maxVisited) return null;
+      const forward = fFront.length <= bFront.length;
+      const [front, own, other, csr] = forward
+        ? [fFront, fwd, bwd, this.out] : [bFront, bwd, fwd, this.in];
+      const next = [];
+      for (const u of front) {
+        for (const v of csr.neighbours(u)) {
+          if (own.has(v)) continue;
+          own.set(v, u);
+          if (other.has(v)) return meet(v);
+          next.push(v);
+        }
+      }
+      if (forward) fFront = next; else bFront = next;
+    }
+    return null;
   }
 
   /** Every article filed under `catPid`, walking `depth` levels of subcategories. */
@@ -160,12 +266,26 @@ export class WikiGraph {
     return { ids, branch, root: catPid };
   }
 
-  /** The `limit` best-connected articles: a map of the wiki's own centre of gravity. */
+  /**
+   * The `limit` most linked-to articles: the wiki's own centre of gravity.
+   *
+   * By in-degree, computed once and cached. The trick is a numeric typed-array sort:
+   * packing (indeg, idx) into one float -- indeg * 2^24 + idx, exact below 2^53 --
+   * lets Float64Array.sort run without a comparator, which is what makes ordering
+   * enwiki's 7M articles a sub-second startup cost rather than a 30-second one.
+   */
   top(limit = 3000) {
-    return this.db
-      .prepare("SELECT idx FROM node ORDER BY deg DESC LIMIT ?")
-      .all(limit)
-      .map((r) => Number(r.idx));
+    if (!this._topOrder) {
+      const key = new Float64Array(this.n);
+      for (let i = 0; i < this.n; i++) key[i] = this.indeg[i] * 16777216 + i;
+      key.sort();
+      this._topOrder = key;
+    }
+    const out = [];
+    for (let k = this.n - 1; k >= 0 && out.length < limit; k--) {
+      out.push(this._topOrder[k] % 16777216);
+    }
+    return out;
   }
 
   // ------------------------------------------------------------------ assembly
@@ -176,10 +296,10 @@ export class WikiGraph {
   /**
    * @param {number[]} ids
    * @param {{ title: string, wedgeOf?: Map<number,number>, wedges?: number,
-   *           depth?: Map<number,number> }} opts
+   *           depth?: Map<number,number>, typeOf?: (id: number) => string }} opts
    */
   toVaultData(ids, opts) {
-    const { title, wedgeOf, wedges = 12, depth } = opts;
+    const { title, wedgeOf, wedges = 12, depth, typeOf } = opts;
     const pos = new Map(ids.map((id, i) => [id, i]));
     const ph = ids.map(() => "?").join(",");
 
@@ -239,7 +359,7 @@ export class WikiGraph {
         // The hop a node was reached at is the one grouping a neighbourhood view has
         // that a category view does not, so it rides along as the node's type. The
         // detail card prints it after the topic ("Science / 2 hops away").
-        type: depth ? hopLabel(depth.get(id) ?? 0) : "article",
+        type: typeOf ? typeOf(id) : depth ? hopLabel(depth.get(id) ?? 0) : "article",
         tags: [],
         // `page` carries no creation date -- only `page_touched`. The timeline is
         // therefore "last edited", and the UI says so rather than implying growth.
