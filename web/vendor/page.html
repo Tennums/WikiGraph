@@ -1,7 +1,7 @@
 <div id="vg-app" class="vault-graph" data-theme="dark">
   <aside id="vg-sidebar">
     <div class="brand">
-      <h1 id="vg-vname">Vault Graph</h1>
+      <h1 id="vg-vname">Wikigraph</h1>
       <button id="vg-gear" class="gear" hidden aria-expanded="false"
               aria-controls="vg-settings" title="Settings">
         <span aria-hidden="true">&#9881;</span><span class="sr">Settings</span>
@@ -12,12 +12,12 @@
       <!-- github#23 -->
       <div id="vg-optbody"></div>
       <div class="row" style="margin-bottom:7px">
-        <div class="lbl" style="margin:0">Folder colours</div>
-        <div class="mini"><button id="vg-fcreset" title="Drop every folder AND subfolder override and go back to the automatic order">Reset</button></div>
+        <div class="lbl" style="margin:0">Topic colours</div>
+        <div class="mini"><button id="vg-fcreset" title="Drop every topic AND subtopic override and go back to the automatic order">Reset</button></div>
       </div>
       <div id="vg-setbody"></div>
-      <p class="hint">Twelve slots, handed out in folder order and round again. Setting
-        one folder never moves another, and two folders may share a colour.</p>
+      <p class="hint">Twelve slots, handed out in topic order and round again. Setting
+        one topic never moves another, and two topics may share a colour.</p>
     </div>
 
     <div class="block">
@@ -25,13 +25,13 @@
 
     <div class="block">
       <div class="lbl">Search</div>
-      <input type="search" id="vg-q" placeholder="Find a note...">
+      <input type="search" id="vg-q" placeholder="Find an article...">
       <div id="vg-hits"></div>
     </div>
 
     <div class="block">
       <div class="row" style="margin-bottom:7px">
-        <div class="lbl" style="margin:0">Groups <span id="vg-gcount" class="val"></span></div>
+        <div class="lbl" style="margin:0">Topics <span id="vg-gcount" class="val"></span></div>
         <div class="mini"><button id="vg-allon">All</button><button id="vg-alloff">None</button></div>
       </div>
       <div id="vg-legend"></div>
@@ -40,7 +40,7 @@
     <div class="block">
       <div class="lbl">View</div>
       <div class="tools">
-        <button id="vg-refresh" title="Back to the defaults, and replay the intro. Clears highlights and the date range, and returns each folder to the visibility set in the gear -- so archives go back to hidden. This page is a snapshot -- its data was baked in when it was built -- so to pick up notes written since, rebuild it with refresh-graph.ps1 (or build-graph.mjs). The Obsidian plugin rebuilds in place instead.">Refresh</button>
+        <button id="vg-refresh" title="Back to the defaults, and replay the intro. Clears highlights and the date range, and shows every topic again.">Refresh</button>
         <button id="vg-png">Save PNG</button>
         <button id="vg-dbg" title="Copy the exact layout state, for a bug report">Debug</button>
       </div>
@@ -52,13 +52,13 @@
   <main id="vg-stage">
     <div id="vg-heat">
       <div class="hrow">
-        <div class="lbl">Notes added</div>
+        <div class="lbl">Articles last edited</div>
         <span id="vg-heatnote"></span>
         <div id="vg-heatscale" aria-hidden="true">
           <span>fewer</span><canvas id="vg-heatkey"></canvas><span>more</span>
         </div>
         <button id="vg-compact" type="button" aria-pressed="true"
-                title="Compact the date axis by note count. Off gives every year and month equal width."
+                title="Compact the date axis by article count. Off gives every year and month equal width."
                 aria-label="Compact date axis">
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
             <path d="M3 4l3 4-3 4M13 4l-3 4 3 4" fill="none" stroke="currentColor"
@@ -122,14 +122,14 @@
       <!-- github#73 -->
       <div id="vg-mob" role="group" aria-label="Panels">
         <button id="vg-sheet" type="button" aria-expanded="false"
-                title="Folders, search and the view buttons" aria-label="Show the folder list">
+                title="Topics, search and the view buttons" aria-label="Show the topic list">
           <svg viewBox="0 0 16 16" width="17" height="17" aria-hidden="true" focusable="false">
             <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" fill="none" stroke="currentColor"
                   stroke-width="1.6" stroke-linecap="round"/>
           </svg>
         </button>
         <button id="vg-band" type="button" aria-pressed="false"
-                title="The notes-added calendar and the date strip" aria-label="Show the calendar">
+                title="The last-edited calendar and the date strip" aria-label="Show the calendar">
           <svg viewBox="0 0 16 16" width="17" height="17" aria-hidden="true" focusable="false">
             <rect x="2.2" y="3.2" width="11.6" height="9.6" rx="1.4" fill="none"
                   stroke="currentColor" stroke-width="1.4"/>

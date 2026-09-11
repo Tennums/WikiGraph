@@ -191,6 +191,7 @@ export class WikiGraph {
     );
 
     const label = (t) => String(t).replace(/_/g, " ");
+    const hopLabel = (h) => (h === 0 ? "the seed" : h === 1 ? "1 hop away" : `${h} hops away`);
 
     // Wedges. The category view knows its own grouping and passes it in; every other
     // view uses the topic assigned at build time.
@@ -236,8 +237,9 @@ export class WikiGraph {
         dirs: [],
         sub: "",
         // The hop a node was reached at is the one grouping a neighbourhood view has
-        // that a category view does not, so it rides along as the node's type.
-        type: depth ? `hop-${depth.get(id) ?? 0}` : "article",
+        // that a category view does not, so it rides along as the node's type. The
+        // detail card prints it after the topic ("Science / 2 hops away").
+        type: depth ? hopLabel(depth.get(id) ?? 0) : "article",
         tags: [],
         // `page` carries no creation date -- only `page_touched`. The timeline is
         // therefore "last edited", and the UI says so rather than implying growth.

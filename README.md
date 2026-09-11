@@ -4,8 +4,9 @@
 Wikipedia instead of an Obsidian vault. Every article is a dot; every subject area owns a
 wedge of the circle; best-connected articles sit near the centre.
 
-The interface is upstream's, unmodified, in `web/vendor/`. Everything else here exists to
-hand it the object it expects.
+The interface is upstream's, in `web/vendor/`, with its vocabulary changed from Obsidian's
+to Wikipedia's and nothing else touched. Everything else here exists to hand it the object
+it expects.
 
 ---
 
@@ -247,13 +248,15 @@ ingest/build.py       dumps -> CSR + SQLite
 api/graph.mjs         CSR reader, selections, VAULT_DATA assembly
 api/server.mjs        HTTP; no npm dependencies (node:http + node:sqlite)
 web/index.html        the shell: view picker, search, Kiwix wiring
-web/vendor/           vault-graph, verbatim — do not edit
+web/vendor/           vault-graph v2.3.0, vocabulary adapted — see UPSTREAM.md
 ```
 
-`web/vendor/` is upstream's `src/`, unmodified, so it can be re-vendored from a new
-release without replaying a patch. The one place Obsidian leaks into the render layer is a
-hardcoded `obsidian://open` href on the detail card; `web/index.html` rewrites that anchor
-after the card draws rather than patching the file.
+`web/vendor/` began as a verbatim copy of upstream's `src/` (commit `afcc942` here) and
+has since diverged in exactly two ways: the user-facing strings say *article*, *topic* and
+*wiki* instead of *note*, *folder* and *vault*, and the detail card's open button takes its
+URL from a `deps.articleHref` callback rather than a hardcoded `obsidian://` link. Layout,
+rendering and interaction code are untouched. `web/vendor/UPSTREAM.md` records the upstream
+commit and how to carry our changes onto a newer release with `git apply --3way`.
 
 ## Licence
 

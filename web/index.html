@@ -28,12 +28,6 @@
 
   #mount { flex: 1; min-height: 0; position: relative; }
   #mount > .vault-graph { height: 100%; }
-
-  /* Injected into the detail card; matched to the card's own type scale. */
-  .wg-read { display: inline-block; margin-top: 8px; padding: 4px 10px;
-             background: #2b6cb0; color: #fff !important; border-radius: 4px;
-             text-decoration: none; font-weight: 600; }
-  .wg-read:hover { background: #3182ce; }
 </style>
 </head>
 <body>
@@ -83,12 +77,9 @@ try {
   status("API unreachable", true);
 }
 
-// The markup lives in the vendored page.html exactly as upstream ships it, so pulling
-// it in at runtime keeps this shell free of a build step and the vendor tree free of
-// our edits.
+// The markup lives in vendor/page.html; pulling it in at runtime keeps this shell free
+// of a build step.
 const markup = await (await fetch("vendor/page.html")).text();
-
-let teardown = null;
 
 async function draw() {
   const view = $("view").value;
@@ -117,7 +108,6 @@ async function draw() {
   // one per view is the honest way to swap datasets -- reusing the node would leave
   // the previous disc's locks (band, geometry, normalisation box) in place, and those
   // are deliberately derived once at load.
-  if (teardown) teardown();
   $("mount").innerHTML = markup;
 
   const t1 = performance.now();
@@ -125,51 +115,16 @@ async function draw() {
     Graph: window.VaultGraphEngine.GraphStore,
     Renderer: window.VaultGraphEngine.Renderer,
     settingsUI: false,
+    // The detail card's "read" button. No `/A/` namespace: ZIMs built since 2021 put
+    // articles at /content/<book>/<Title> directly. Returning nothing (no ZIM
+    // configured) makes the page omit the button rather than draw a dead one.
+    articleHref: (label) =>
+      info.reader ? `${info.reader}/${encodeURIComponent(label.replace(/ /g, "_"))}` : "",
   });
   const drawn = Math.round(performance.now() - t1);
 
   status(`${data.nodes.length.toLocaleString()} articles · ` +
          `${data.edges.length.toLocaleString()} links · ${queried}ms query · ${drawn}ms draw`);
-
-  teardown = watchDetail();
-}
-
-/**
- * Point the detail card's open button at Kiwix.
- *
- * The card already has exactly the right button; upstream hardcodes it to
- * `obsidian://open?vault=…`, which is the only place the Obsidian assumption reaches
- * into the render layer. Rewriting the anchor the card just drew keeps `vendor/` a
- * verbatim copy of upstream -- so it can be re-vendored from a new release without
- * replaying a patch -- and inherits the card's own styling and placement for free.
- *
- * With no ZIM configured the button is removed rather than left pointing at a handler
- * this machine does not have.
- */
-function watchDetail() {
-  const card = $("mount").querySelector("#vg-detail");
-  if (!card) return null;
-
-  const retarget = () => {
-    const a = card.querySelector("a.open");
-    if (!a || a.dataset.wg) return;
-    a.dataset.wg = "1";
-    if (!info.reader) { a.remove(); return; }
-    const title = card.querySelector("h2, h3, .title")?.textContent?.trim();
-    if (!title) return;
-    // No `/A/` namespace: ZIMs built since 2021 put articles at /content/<book>/<Title>
-    // directly. kiwix-serve still answers the old /A/ form with a redirect, but that
-    // is a compatibility shim, not the address.
-    a.href = `${info.reader}/${encodeURIComponent(title.replace(/ /g, "_"))}`;
-    a.target = "_blank";
-    a.rel = "noopener";
-    a.textContent = "Read the article →";
-  };
-
-  const obs = new MutationObserver(retarget);
-  obs.observe(card, { childList: true, subtree: true });
-  retarget();
-  return () => obs.disconnect();
 }
 
 // Typeahead straight off the title index.

@@ -21,7 +21,7 @@
  * @typedef {Object} VaultNode
  * @property {string} id           vault-relative path with "/" separators, or "ghost:<name>"
  * @property {string} label        the note's basename
- * @property {string} folder       first path segment; "(vault root)" or "(unresolved)"
+ * @property {string} folder       the topic (wedge); "(uncategorised)" when none
  * @property {string[]} dirs       the named folders below it, month folders handled
  * @property {string} sub          dirs[0] or ""
  * @property {string} type         inferred note type ("note", "daily", "person", ...)
@@ -5007,7 +5007,10 @@ function mountVaultGraph(root, data, deps) {
     var nb = neighboursOf(id).slice().sort(function (p, q) {
       return graph.getNodeAttribute(q, "deg") - graph.getNodeAttribute(p, "deg");
     });
-    var vault = encodeURIComponent(DATA.vault);
+    // Where "open" goes is the host's decision: the vault-graph plugin opened the note
+    // in Obsidian, this page opens the article in Kiwix. `deps.articleHref(label)`
+    // returns the URL, or nothing to drop the button entirely.
+    var openHref = typeof deps.articleHref === "function" ? deps.articleHref(a.label) : "";
     var file = encodeURIComponent(a.path.replace(/\.md$/, ""));
 
     var h = '<button class="x" title="Close">&times;</button>' +
@@ -5025,14 +5028,14 @@ function mountVaultGraph(root, data, deps) {
       '<div class="chip" style="border-style:dashed">' + esc(a.folder) +
         (a.sub ? ' / ' + esc(a.sub) : '') + ' / ' + esc(a.ntype) + '</div>' +
       '<div class="actions">' +
-        (a.ghost ? "" : '<a class="open" href="obsidian://open?vault=' + vault + '&file=' + file + '">Open in Obsidian</a>') +
+        (a.ghost || !openHref ? "" : '<a class="open" href="' + esc(openHref) + '" target="_blank" rel="noopener">Read the article &rarr;</a>') +
         '<button class="btn pin" data-pin="' + id + '" aria-pressed="' + isPinned(id) + '" title="' +
           (isPinned(id) ? "Unpin from hub" : "Pin to hub") + '">' + pinSvg(isPinned(id)) +
           ' Pin to hub</button>' +
       '</div>';
 
     if (nb.length) {
-      h += '<div class="nb">Linked notes (' + nb.length + ')</div><ul>' +
+      h += '<div class="nb">Linked articles (' + nb.length + ')</div><ul>' +
         nb.slice(0, 40).map(function (n) {
           return '<li><button data-go="' + n + '">' +
                  esc(graph.getNodeAttribute(n, "label")) +
@@ -5084,10 +5087,10 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} g @param {Record<string, boolean> | null} bandLock */
   function swatchTitle(g, bandLock) {
     if (g === UNLINKED && unlinkedTintByFolder && unlinkedTintColors.length > 1) {
-      return "Mixed — coloured by folder";
+      return "Mixed — coloured by topic";
     }
     // github#3, github#50
-    if (!counts[g]) return "No notes on the disc";
+    if (!counts[g]) return "No articles on the disc";
     return bandLock && bandLock[g] ? "Inner ring" : "Outer ring";
   }
 
@@ -5214,9 +5217,9 @@ function mountVaultGraph(root, data, deps) {
       var lgAttrs = ' class="lg' + (shown ? " bar" + (share ? "" : " bar-out") : "") +
         '" style="--vg-share:' + (shown * 100).toFixed(3) + '%;--vg-bar:' + colorOf(g) + '"';
       var ctTitle = share
-        ? ' title="' + counts[g] + (counts[g] === 1 ? " note" : " notes") +
+        ? ' title="' + counts[g] + (counts[g] === 1 ? " article" : " articles") +
           (g === basis.group
-            ? " · the largest folder shown"
+            ? " · the largest topic shown"
             : " · " + shareText(share) + " of " + esc(basis.group)) + '"'
         : '';
 
@@ -5262,7 +5265,7 @@ function mountVaultGraph(root, data, deps) {
         };
         subs.slice(0, SUB_NAMED).forEach(function (sb, k) {
           var pk = g + "/" + sb, tint = subShade[pk] || colorOf(g);
-          row += srow(tint, sb || "(directly in folder)", subCount[pk] || 0, [k], 1,
+          row += srow(tint, sb || "(directly in topic)", subCount[pk] || 0, [k], 1,
                       (sb && kids[pk]) ? 'data-twp="' + esc(pk) + '"' : null,
                       !!state.pathOpen[pk]);
           if (sb) row += subtree(pk, 2, tint);
@@ -5279,7 +5282,7 @@ function mountVaultGraph(root, data, deps) {
           if (tOpen) {
             tail.forEach(function (sb, j) {
               var pk = g + "/" + sb, tint = subShade[pk] || colorOf(g);
-              row += srow(tint, sb || "(directly in folder)", subCount[pk] || 0,
+              row += srow(tint, sb || "(directly in topic)", subCount[pk] || 0,
                           [SUB_NAMED + j], 2,
                           (sb && kids[pk]) ? 'data-twp="' + esc(pk) + '"' : null,
                           !!state.pathOpen[pk]);
@@ -5781,8 +5784,7 @@ function mountVaultGraph(root, data, deps) {
     // github#6
     var onRefresh = typeof deps.onRefresh === "function" ? deps.onRefresh : null;
     if (onRefresh) {
-      $("refresh").title = "Rebuild from the vault and replay. Picks up notes written " +
-                           "since the graph was drawn, and clears every filter.";
+      $("refresh").title = "Redraw from the graph and replay. Clears every filter.";
     }
     $("refresh").onclick = function () {
       if (onRefresh) { onRefresh(); return; }
@@ -5819,7 +5821,7 @@ function mountVaultGraph(root, data, deps) {
         try {
           var a = DOC.createElement("a");
           a.href = "data:application/json;charset=utf-8," + encodeURIComponent(txt);
-          a.download = "vault-graph-debug.json";
+          a.download = "wikigraph-debug.json";
           a.click();
           done("Saved");
         } catch {
@@ -5939,24 +5941,24 @@ function mountVaultGraph(root, data, deps) {
         role: "menuitemradio", current: current, autoKey: autoKey,
         titleFor: function (on, isAuto) { return isAuto ? " (automatic)" : ""; }
       });
-      var visTitle = visShown ? "Hide this folder by default" : "Show this folder by default";
+      var visTitle = visShown ? "Hide this topic by default" : "Show this topic by default";
       var visHTML = onToggleVisible
         ? '<button class="vis" data-vis aria-pressed="' + visShown + '" title="' + visTitle +
           '">' + eyeSvg(visShown) + '<span>Shown by default</span></button>'
         : "";
       var byFolderTitle = byFolderOn
-        ? "Keep unlinked notes in their own group instead"
-        : "Let each unlinked note join its own folder's group";
+        ? "Keep unlinked articles in their own group instead"
+        : "Let each unlinked article join its own topic's group";
       var byFolderHTML = onToggleByFolder
         ? '<button class="vis" data-byfolder aria-pressed="' + byFolderOn + '" title="' +
-          byFolderTitle + '">' + dotSvg(byFolderOn) + '<span>Joins its folder</span></button>'
+          byFolderTitle + '">' + dotSvg(byFolderOn) + '<span>Joins its topic</span></button>'
         : "";
       var tintTitle = tintOn
         ? "Use the flat unlinked swatch instead"
-        : "Give each unlinked note its own folder's colour";
+        : "Give each unlinked article its own topic's colour";
       var tintHTML = onToggleTint
         ? '<button class="vis" data-tint aria-pressed="' + tintOn + '" title="' +
-          tintTitle + '">' + dotSvg(tintOn) + '<span>Colour by folder</span></button>'
+          tintTitle + '">' + dotSvg(tintOn) + '<span>Colour by topic</span></button>'
         : "";
       setHTML(el, '<div class="sws">' + sws + '</div>' +
                   '<button class="auto" data-key="" aria-pressed="' + !current +
@@ -6065,7 +6067,7 @@ function mountVaultGraph(root, data, deps) {
         var pk = g + "/" + sb;
         var pin = subfolderColors[pk] || "";
         var tint = subShade[pk] || colorOf(g);
-        var nm = sb || "(directly in folder)";
+        var nm = sb || "(directly in topic)";
         var sws = swatchButtonsHTML(pal, {
           role: "radio", dataAttr: "sfc", dataValue: pk, current: pin,
           titleFor: function (on, isAuto) { return on ? " (chosen)" : ""; }
@@ -6087,20 +6089,20 @@ function mountVaultGraph(root, data, deps) {
     // github#23, github#3
     var OPTION_ROWS = [
       { key: "compactAxis", label: "Compact date axis",
-        title: "Give each year width by how many notes it holds, instead of every year reading the same width",
+        title: "Give each year width by how many articles it holds, instead of every year reading the same width",
         get: function () { return compactAxis; },
         set: function (v) { setCompactAxis(v, true); } },
-      { key: "unlinkedByFolder", label: "Unlinked notes join their folder",
-        title: "A note with no links takes its own folder's wedge and colour, instead of sitting apart in a separate unlinked group -- also reachable by right-clicking the (unlinked) row",
+      { key: "unlinkedByFolder", label: "Unlinked articles join their topic",
+        title: "An article with no links takes its own topic's wedge and colour, instead of sitting apart in a separate unlinked group -- also reachable by right-clicking the (unlinked) row",
         get: function () { return unlinkedByFolder; },
         set: function (v) { setUnlinkedByFolder(v, true); } },
-      { key: "unlinkedTintByFolder", label: "Colour unlinked notes by folder",
-        title: "While unlinked notes are kept as their own group, give each one its own folder's colour instead of the flat unlinked swatch -- also reachable by right-clicking the (unlinked) row",
+      { key: "unlinkedTintByFolder", label: "Colour unlinked articles by topic",
+        title: "While unlinked articles are kept as their own group, give each one its own topic's colour instead of the flat unlinked swatch -- also reachable by right-clicking the (unlinked) row",
         get: function () { return unlinkedTintByFolder; },
         set: function (v) { setUnlinkedTintByFolder(v, true); } },
       // github#78, design/0006
       { key: "countBars", label: "Count bars in the legend",
-        title: "Draw a short rule along the bottom of each folder row, in that folder's own colour, scaled so the largest folder currently shown fills its row -- the count alone makes 406 notes and 1 note look the same",
+        title: "Draw a short rule along the bottom of each topic row, in that topic's own colour, scaled so the largest topic currently shown fills its row -- the count alone makes 406 articles and 1 article look the same",
         get: function () { return countBars; },
         set: function (v) { setCountBars(v, true); } }
     ];
@@ -6145,7 +6147,7 @@ function mountVaultGraph(root, data, deps) {
                '<span class="nm" title="' + esc(g) + '">' + esc(g) + '</span>' +
                '<button class="auto" data-fc="' + esc(g) + '" data-key=""' +
                ' aria-pressed="' + (!pinned) + '"' +
-               ' title="Back to the slot this folder gets automatically">Auto</button>' +
+               ' title="Back to the slot this topic gets automatically">Auto</button>' +
                '</div>' +
                '<span class="sws">' + sws + '</span></div>' +
                (open ? subfolderRows(g, pal) : "");
@@ -6235,7 +6237,7 @@ function mountVaultGraph(root, data, deps) {
     var b = $("sheet");
     if (b) {
       b.setAttribute("aria-expanded", sheetOpen ? "true" : "false");
-      b.setAttribute("aria-label", sheetOpen ? "Hide the folder list" : "Show the folder list");
+      b.setAttribute("aria-label", sheetOpen ? "Hide the topic list" : "Show the topic list");
     }
     syncCanvasTop();
     if (quiet) return;
@@ -6468,16 +6470,16 @@ function mountVaultGraph(root, data, deps) {
     });
     var a = DOC.createElement("a");
     a.href = out.toDataURL("image/png");
-    a.download = "vault-graph.png";
+    a.download = "wikigraph.png";
     a.click();
   }
 
   function buildStats() {
     var s = DATA.stats;
-    $("vname").textContent = DATA.vault + " graph";
-    setHTML($("stats"), "<b>" + s.nodes + "</b> notes &middot; <b>" + s.edges + "</b> links &middot; <b>" +
+    $("vname").textContent = DATA.vault;
+    setHTML($("stats"), "<b>" + s.nodes + "</b> articles &middot; <b>" + s.edges + "</b> links &middot; <b>" +
       s.orphans + "</b> unlinked<br>" +
-      "<b>" + s.unresolved + "</b> link(s) point at notes that do not exist" +
+      "<b>" + s.unresolved + "</b> link(s) point at articles that do not exist" +
       (s.ghostsIncluded ? " (shown as ghosts)" : " (hidden)") + "<br>" +
       (s.templatesExcluded ? "Templates excluded. " : "") +
       "Generated " + esc(DATA.generated));
@@ -6646,7 +6648,7 @@ function mountVaultGraph(root, data, deps) {
     var inWin = 0;
     for (var i = 0; i < keys.length; i++) inWin += days[keys[i]].ids.length;
     $("heatnote").textContent =
-      "last " + cols + " weeks · " + inWin + " of " + graph.order + " notes" +
+      "last " + cols + " weeks · " + inWin + " of " + graph.order + " articles" +
       (before ? " · " + before + " earlier" : "") +
       (after ? " · " + after + " later" : "") +
       (undated ? " · " + undated + " undated" : "");
@@ -6836,7 +6838,7 @@ function mountVaultGraph(root, data, deps) {
       ctx.restore();
     }
     cv.title = anchors.map(function (a) {
-      return a + (a === 1 ? " note" : " notes");
+      return a + (a === 1 ? " article" : " articles");
     }).join("  ·  ");
   }
 
@@ -6883,7 +6885,7 @@ function mountVaultGraph(root, data, deps) {
     setHTML(t, '<div class="t">' + esc(d.key) + " · " + wd +
       (d.key === TODAY ? " · today" : "") + "</div>" +
       '<div class="m">' +
-      (n ? n + " note" + (n === 1 ? "" : "s") + " added" : "nothing added") +
+      (n ? n + " article" + (n === 1 ? "" : "s") + " edited" : "nothing edited") +
       (top.length ? "<br>" + top.map(function (g2) {
         return '<b style="color:' + colorOf(g2) + '">■ </b> ' + esc(g2) + " " + by[g2];
       }).join("<br>") : "") +
@@ -7036,7 +7038,7 @@ function mountVaultGraph(root, data, deps) {
       b.type = "button";
       b.setAttribute("data-yr", String(yy.y));
       b.setAttribute("aria-pressed", cur === yy.y ? "true" : "false");
-      b.title = yy.y + " -- " + yy.n + " note" + (yy.n === 1 ? "" : "s");
+      b.title = yy.y + " -- " + yy.n + " article" + (yy.n === 1 ? "" : "s");
       b.style.setProperty("left", Math.round(at) + "px");
       b.textContent = "'" + String(yy.y).slice(2);
       made.push(b);
