@@ -224,6 +224,38 @@ def write_kinds(out: Path, wiki: str, titles, dab_idx: set, indeg=None) -> None:
             log(f"  {int(indeg[i]):8,}  {tag:14}  {titles[i]}")
 
 
+def write_search_index(out: Path, wiki: str, tmp: Path, titles, indeg) -> None:
+    """A separate FTS5 database over titles, ranked by in-degree.
+
+    Separate, because the main database lives on a NAS and is never written after the
+    build; this one is built locally and moved, like the main one was. Titles are stored
+    with spaces so the tokenizer splits words, and with diacritics folded so "Zurich"
+    finds "Zürich". In-degree rides along as a column: bm25 rank is meaningless for a
+    title index, and what a user wants first is the article the wiki points at most.
+    """
+    staged = tmp / f"{wiki}.search.db.building"
+    for stale in (staged, Path(str(staged) + "-journal")):
+        stale.unlink(missing_ok=True)
+    con = sqlite3.connect(staged)
+    con.executescript("""
+        PRAGMA journal_mode = OFF;
+        PRAGMA synchronous  = OFF;
+        CREATE VIRTUAL TABLE titles USING fts5(
+            title, idx UNINDEXED, indeg UNINDEXED,
+            tokenize = 'unicode61 remove_diacritics 2'
+        );
+    """)
+    con.executemany("INSERT INTO titles (title, idx, indeg) VALUES (?, ?, ?)",
+                    ((t.replace("_", " "), i, int(indeg[i])) for i, t in enumerate(titles)))
+    con.execute("INSERT INTO titles(titles) VALUES ('optimize')")
+    con.commit()
+    con.close()
+    dest = out / f"{wiki}.search.db"
+    dest.unlink(missing_ok=True)
+    shutil.move(str(staged), str(dest))
+    log(f"wrote {dest} ({dest.stat().st_size / 1e6:.0f} MB, {len(titles):,} titles)")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--wiki", default="simplewiki", help="e.g. simplewiki, enwiki")
@@ -239,6 +271,9 @@ def main() -> None:
     ap.add_argument("--reverse-only", action="store_true",
                     help="derive the in-link .rcsr from an existing .csr and stop; "
                          "reads no dumps, touches no database")
+    ap.add_argument("--index-only", action="store_true",
+                    help="build the title search index <wiki>.search.db for an "
+                         "existing build; reads only the existing .db and .rcsr")
     ap.add_argument("--classify-only", action="store_true",
                     help="write <wiki>.kind (list / date / disambiguation / "
                          "infrastructure) for an existing build; reads the page and "
@@ -252,12 +287,33 @@ def main() -> None:
                     help="drop articles shorter than this many bytes (stub filter)")
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
+    tmp = args.tmpdir or Path(tempfile.gettempdir())
+    if tmp.exists() and not tmp.is_dir():
+        sys.exit(f"--tmpdir {tmp} exists but is not a directory")
+    tmp.mkdir(parents=True, exist_ok=True)
 
     if args.reverse_only:
         csr = args.out / f"{args.wiki}.csr"
         if not csr.exists():
             sys.exit(f"--reverse-only needs an existing {csr}")
         write_reverse(csr, args.out / f"{args.wiki}.rcsr")
+        return
+
+    if args.index_only:
+        db = args.out / f"{args.wiki}.db"
+        rcsr = args.out / f"{args.wiki}.rcsr"
+        for need in (db, rcsr):
+            if not need.exists():
+                sys.exit(f"--index-only needs an existing {need}")
+        log("reading titles from the database ...")
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        titles = [t for _, t in con.execute("SELECT idx, title FROM node ORDER BY idx")]
+        con.close()
+        hn = int(np.fromfile(rcsr, dtype=np.int64, count=4)[2])
+        if hn != len(titles):
+            sys.exit(f"{rcsr} holds {hn:,} articles, the database {len(titles):,}")
+        indeg = np.diff(np.fromfile(rcsr, dtype=np.int64, count=hn + 1, offset=HEADER))
+        write_search_index(args.out, args.wiki, tmp, titles, indeg)
         return
 
     if args.classify_only:
@@ -294,10 +350,6 @@ def main() -> None:
         write_kinds(args.out, args.wiki, titles, dab, indeg)
         return
 
-    tmp = args.tmpdir or Path(tempfile.gettempdir())
-    if tmp.exists() and not tmp.is_dir():
-        sys.exit(f"--tmpdir {tmp} exists but is not a directory")
-    tmp.mkdir(parents=True, exist_ok=True)
     free = shutil.disk_usage(tmp).free
     log(f"scratch: {tmp} ({free / 1e9:.0f} GB free)")
     # enwiki wants ~6 GB for the edge file and ~8 GB for the database. Checking now
@@ -675,6 +727,7 @@ def main() -> None:
     rn = int(np.fromfile(rcsr, dtype=np.int64, count=4)[2])
     indeg = np.diff(np.fromfile(rcsr, dtype=np.int64, count=rn + 1, offset=HEADER))
     write_kinds(args.out, args.wiki, art_title, dab_idx, indeg)
+    write_search_index(args.out, args.wiki, tmp, art_title, indeg)
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@
  * 8 bytes per article, 56 MB at enwiki scale.
  */
 
-import { openSync, readSync, statSync, closeSync } from "node:fs";
+import { openSync, readSync, statSync, closeSync, existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
 const MAGIC = 0x57474b31; // "WGK1"
@@ -82,8 +82,8 @@ export const KIND_NAMES = ["article", "list", "date", "dab", "infra"];
 
 export class WikiGraph {
   /** @param {string} csrPath @param {string} rcsrPath @param {string} dbPath
-   *  @param {string} kindPath */
-  constructor(csrPath, rcsrPath, dbPath, kindPath) {
+   *  @param {string} kindPath @param {string} [searchPath] */
+  constructor(csrPath, rcsrPath, dbPath, kindPath, searchPath) {
     this.out = new Csr(csrPath);   // who this article links to
     this.in = new Csr(rcsrPath);   // who links to this article
     if (this.in.n !== this.out.n || this.in.m !== this.out.m) {
@@ -121,10 +121,18 @@ export class WikiGraph {
     this.meta = Object.fromEntries(
       this.db.prepare("SELECT k, v FROM meta").all().map((r) => [r.k, r.v]),
     );
+
+    // Optional: the FTS5 title index. Without it search falls back to a case-sensitive
+    // prefix LIKE, which is what it was, so an older build keeps working -- just worse.
+    this.fts = null;
+    if (searchPath && existsSync(searchPath)) {
+      this.fts = new DatabaseSync(searchPath, { readOnly: true });
+    }
   }
 
   close() {
     this.db.close();
+    if (this.fts) this.fts.close();
     this.out.close();
     this.in.close();
   }
@@ -161,22 +169,54 @@ export class WikiGraph {
   }
 
   /**
-   * Prefix search, ranked by in-degree.
+   * Title search, ranked by in-degree.
    *
-   * The database only indexes out-degree, so it is asked for a wider net and the
-   * re-ranking happens here -- cheaper than a schema change, and it means the graph
-   * files alone decide what "important" means.
+   * With the FTS5 index: every word the user typed becomes a prefix term, so "alb ein"
+   * finds Albert Einstein and "einstein" finds it too -- case-insensitive, diacritics
+   * folded. Without it: the old prefix LIKE, fetched wide and re-ranked here.
    */
   search(q, limit = 20, hide = []) {
     const ok = this.allow(hide);
-    const rows = this.db
-      .prepare("SELECT idx, title FROM node WHERE title LIKE ? LIMIT ?")
-      .all(String(q).trim().replace(/ /g, "_") + "%", Math.max(200, limit * 10));
+    const text = String(q).trim();
+    if (!text) return [];
+
+    let rows;
+    if (this.fts) {
+      // Each word a prefix term; FTS5 syntax characters are stripped, since a stray
+      // quote or asterisk from the user is a typo, not an operator.
+      const terms = text.split(/\s+/).map((w) => w.replace(/["*():^\-]/g, "")).filter(Boolean);
+      if (!terms.length) return [];
+      const match = terms.map((w) => `"${w}"*`).join(" ");
+      // ORDER BY over an unindexed column materialises every match, so a one-letter
+      // prefix is the slow case; the UI asks for two characters or more.
+      rows = this.fts
+        .prepare("SELECT idx, title FROM titles WHERE titles MATCH ? ORDER BY indeg DESC LIMIT ?")
+        .all(match, limit * 5)
+        .map((r) => ({ idx: Number(r.idx), title: String(r.title).replace(/ /g, "_") }));
+    } else {
+      rows = this.db
+        .prepare("SELECT idx, title FROM node WHERE title LIKE ? LIMIT ?")
+        .all(text.replace(/ /g, "_") + "%", Math.max(200, limit * 10))
+        .map((r) => ({ idx: Number(r.idx), title: String(r.title) }));
+    }
     return rows
-      .map((r) => ({ idx: Number(r.idx), title: String(r.title), deg: this.indeg[Number(r.idx)] }))
+      .map((h) => ({ ...h, deg: this.indeg[h.idx] }))
       .filter((h) => ok(h.idx))
       .sort((a, b) => b.deg - a.deg)
       .slice(0, limit);
+  }
+
+  /** Category names by prefix, biggest first -- for the category view's typeahead. */
+  searchCategories(q, limit = 20) {
+    const t = String(q).trim().replace(/ /g, "_");
+    if (!t) return [];
+    return this.db
+      .prepare(`SELECT c.title AS title, count(nc.idx) AS n
+                FROM category c LEFT JOIN node_cat nc ON nc.cat = c.pid
+                WHERE c.title LIKE ? AND c.hidden = 0
+                GROUP BY c.pid ORDER BY n DESC LIMIT ?`)
+      .all(t + "%", limit)
+      .map((r) => ({ title: String(r.title), deg: Number(r.n) }));
   }
 
   // ------------------------------------------------------------------- selections
@@ -366,8 +406,24 @@ export class WikiGraph {
     // selection left two thirds of the articles in none of them. The build's walk down
     // from the wiki's own subject roots is what gives an article something folder-
     // shaped to belong to.
+    // A caller-supplied grouping (the category view's subcategories) is pooled the same
+    // way topics are: the biggest `wedges` keep their own slice, the rest share one.
+    // Twenty-five wedges of which nine hold one article each is a legend, not a disc.
+    const POOL = -1;
     let catName = new Map();
-    if (wedgeOf) catName = this._catNames([...new Set(wedgeOf.values())]);
+    if (wedgeOf) {
+      const freq = new Map();
+      for (const id of ids) {
+        const w = wedgeOf.get(id);
+        if (w !== undefined) freq.set(w, (freq.get(w) ?? 0) + 1);
+      }
+      const keep = new Set([...freq.entries()].sort((a, b) => b[1] - a[1])
+        .slice(0, wedges).map(([w]) => w));
+      const pooled = [...freq.keys()].filter((w) => !keep.has(w)).length;
+      for (const [id, w] of wedgeOf) if (!keep.has(w)) wedgeOf.set(id, POOL);
+      catName = this._catNames([...keep]);
+      if (pooled) catName.set(POOL, `(${pooled} smaller subcategories)`);
+    }
 
     // A wedge per article is only useful while there are few enough to read. Past that
     // the tail is pooled, so one enormous subject cannot crowd out the rest.

@@ -48,7 +48,12 @@ for (const ext of ["csr", "rcsr", "db", "kind"]) {
 }
 
 const graph = new WikiGraph(join(GRAPH_DIR, `${WIKI}.csr`), join(GRAPH_DIR, `${WIKI}.rcsr`),
-                            join(GRAPH_DIR, `${WIKI}.db`), join(GRAPH_DIR, `${WIKI}.kind`));
+                            join(GRAPH_DIR, `${WIKI}.db`), join(GRAPH_DIR, `${WIKI}.kind`),
+                            join(GRAPH_DIR, `${WIKI}.search.db`));
+if (!graph.fts) {
+  console.log(`wikigraph: no ${WIKI}.search.db -- title search is prefix-only; build it with\n` +
+              `  docker compose --profile ingest run --rm ingest --wiki ${WIKI} --index-only`);
+}
 console.log(`wikigraph: ${WIKI} — ${graph.n.toLocaleString()} articles, ` +
             `${graph.m.toLocaleString()} links`);
 
@@ -105,13 +110,16 @@ const server = createServer(async (req, res) => {
           ...graph.meta,
           maxNodes: MAX_NODES,
           kinds: Object.fromEntries(KIND_NAMES.map((k, i) => [k, graph.kindCounts[i]])),
+          search: graph.fts ? "fulltext" : "prefix",
           // kiwix-serve exposes an article at /content/<book>/<Title>. The book name
           // is the ZIM's filename without its extension.
           reader: KIWIX_URL && KIWIX_BOOK ? `${KIWIX_URL}/content/${KIWIX_BOOK}` : null,
         });
 
       case "/api/search":
-        return json(res, 200, graph.search(q.get("q") ?? "", budget(q.get("limit"), 20), hidden(q)));
+        return json(res, 200, q.get("kind") === "category"
+          ? graph.searchCategories(q.get("q") ?? "", budget(q.get("limit"), 20))
+          : graph.search(q.get("q") ?? "", budget(q.get("limit"), 20), hidden(q)));
 
       /* Every view returns the same VAULT_DATA shape; only the selection differs. */
       case "/api/view/neighborhood": {

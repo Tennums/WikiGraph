@@ -207,8 +207,9 @@ const typeahead = (el) => () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(async () => {
     const v = el.value.trim();
-    if (v.length < 2 || $("view").value === "category") return;
-    const hits = await (await fetch(`api/search?q=${encodeURIComponent(v)}&hide=${hideValue()}`)).json();
+    if (v.length < 2) return;
+    const kind = $("view").value === "category" ? "&kind=category" : "";
+    const hits = await (await fetch(`api/search?q=${encodeURIComponent(v)}&hide=${hideValue()}${kind}`)).json();
     $("hits").innerHTML = hits
       .map((h) => `<option value="${h.title.replace(/_/g, " ")}">`).join("");
   }, 180);

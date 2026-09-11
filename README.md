@@ -62,6 +62,19 @@ Germany, City…`.
 A hidden kind is refused as a stepping stone in a path search but never as an endpoint:
 the endpoints are the user's choice.
 
+**Search is a title index**, FTS5 in its own sidecar `<wiki>.search.db`: each word typed
+becomes a prefix term, case-insensitive with diacritics folded, ranked by in-degree. So
+"einstein" finds *Albert Einstein* first, "alb ein" finds it too, and "zurich" finds
+*Zürich*. Body-text search is Kiwix's job and already exists in its own UI. Without the
+sidecar the API falls back to a case-sensitive prefix match and says so at startup:
+
+```bash
+docker compose --profile ingest run --rm ingest --wiki enwiki --index-only
+```
+
+The category view pools its wedges: the twelve biggest subcategories keep their own
+slice and the rest share one, labelled with how many were folded in.
+
 Degree *on the disc* is recomputed over each selection rather than taken globally: the
 disc rings articles by the links it can actually see, and a global degree would pull
 articles to the centre for links to nodes that are not on screen.
@@ -118,7 +131,7 @@ All state lives on the NAS under `DATA_DIR`; the containers hold nothing of thei
 ```
 /media/vault/WikiGraph/
 ├── dumps/     enwiki-latest-*.sql.gz     (input, mounted read-only)
-├── graph/     enwiki.csr, .rcsr, .db, .kind   (built once, then read-only)
+├── graph/     enwiki.{csr,rcsr,db,kind,search.db}   (built once, then read-only)
 └── zim/       <ZIM_BOOK>.zim              (Kiwix)
 ```
 
