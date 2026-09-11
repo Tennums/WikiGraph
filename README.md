@@ -147,18 +147,24 @@ say `/kiwix` out of the box.
 ### The reading layer
 
 Download a ZIM from [the Kiwix library](https://download.kiwix.org/zim/wikipedia/) into
-`/media/vault/WikiGraph/zim/`, build its library index, then start the profile:
+`/media/vault/WikiGraph/zim/`, set `ZIM_BOOK` to its filename without the `.zim`, and
+start the profile:
 
 ```bash
-docker run --rm -v /media/vault/WikiGraph/zim:/zim ghcr.io/kiwix/kiwix-tools:latest \
-  kiwix-manage /zim/library.xml add /zim/wikipedia_en_all_maxi_2026-08.zim
 docker compose --profile kiwix up -d
 ```
 
-Set `ZIM_BOOK` to the book name `kiwix-serve` derives from the file: its filename,
-**lowercased**, without the extension, spaces turned into underscores. The API builds
-article links as `<KIWIX_URL>/content/<ZIM_BOOK>/A/<Article_Title>`, so a wrong book name
-shows as every article 404ing while the disc itself works.
+The profile matters: a plain `up -d` does not start Kiwix, and Caddy answers every
+"read the article" click with a 502 until it is running.
+
+`ZIM_BOOK` does double duty. The compose file hands `/zim/<ZIM_BOOK>.zim` straight to
+`kiwix-serve` — no `library.xml`, no `kiwix-manage` step — and the API builds article
+links as `<KIWIX_URL>/content/<ZIM_BOOK>/A/<Article_Title>`. Kiwix derives the book name
+from the filename (lowercased, no extension), so the two agree by construction; the
+filenames from the Kiwix library are already lowercase.
+
+`docker compose logs kiwix` is the first place to look when articles fail: the image's
+start script prints the directory listing when `kiwix-serve` cannot open its file.
 
 | ZIM | Size |
 |---|---|

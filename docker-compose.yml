@@ -58,11 +58,25 @@ services:
     image: ghcr.io/kiwix/kiwix-tools:latest
     container_name: wikigraph-kiwix
     restart: unless-stopped
+    # Flags only. The image's entrypoint is a start.sh that runs
+    # `kiwix-serve --port=$PORT "$@"` itself, so a command starting with `kiwix-serve`
+    # hands the binary its own name as a positional argument, which it reads as a ZIM
+    # path that does not exist -- and the container restarts in a loop, which Caddy
+    # reports as a 502. PORT defaults to 8080 inside the script.
+    #
     # -r tells kiwix-serve the prefix it is mounted under, so every link and asset it
     # generates is written /kiwix/... . Caddy passes the prefix through untouched
     # rather than stripping it; strip it and kiwix's own absolute URLs break on the
     # first click.
-    command: kiwix-serve --port=8080 --urlRootLocation /kiwix --library /zim/library.xml
+    #
+    # The ZIM is given directly rather than through a library.xml: one file, one
+    # setting (ZIM_BOOK, which the API needs anyway), and no kiwix-manage step to
+    # forget. kiwix-serve derives the book name from the filename exactly as the API
+    # expects, so the two cannot drift.
+    # Not `${ZIM_BOOK:?}`: compose interpolates the whole file before it filters
+    # profiles, so a hard failure here would also break `up -d` for someone who has
+    # no ZIM yet. A missing file instead shows up by name in `logs kiwix`.
+    command: ["--urlRootLocation", "/kiwix", "/zim/${ZIM_BOOK:-SET_ZIM_BOOK_IN_DOTENV}.zim"]
     # As above: Caddy fronts this. Uncomment only to bypass it.
     # ports: ["${KIWIX_PORT:-8080}:8080"]
     volumes:
