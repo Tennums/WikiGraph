@@ -7,6 +7,7 @@
  */
 
 import { createServer } from "node:http";
+import { existsSync, readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { WikiGraph } from "./graph.mjs";
@@ -20,6 +21,25 @@ const WEB_DIR = process.env.WEB_DIR ?? "web";
 const KIWIX_URL = (process.env.KIWIX_URL ?? "").replace(/\/$/, "");
 const KIWIX_BOOK = process.env.KIWIX_BOOK ?? "";
 const MAX_NODES = Number(process.env.MAX_NODES ?? 6000);
+
+// Fail with a sentence, not a stack trace. The usual cause of a missing graph is not a
+// missing graph: it is WIKI falling back to its default because .env is absent -- a
+// fresh clone has no .env, since it is deliberately untracked -- and an ENOENT for
+// simplewiki.csr says nothing about that while the enwiki graph sits right beside it.
+for (const ext of ["csr", "db"]) {
+  const want = join(GRAPH_DIR, `${WIKI}.${ext}`);
+  if (existsSync(want)) continue;
+  const have = existsSync(GRAPH_DIR)
+    ? readdirSync(GRAPH_DIR).filter((f) => /\.(csr|db)$/.test(f)).sort()
+    : [];
+  const hint = have.length
+    ? `${GRAPH_DIR} holds: ${have.join(", ")} -- is WIKI set in .env? ` +
+      `(WIKI is "${WIKI}"${process.env.WIKI ? "" : ", the default: no WIKI in the environment"})`
+    : `${GRAPH_DIR} holds no graph at all -- run the ingest first, ` +
+      `and check DATA_DIR points at the NAS`;
+  console.error(`wikigraph: no ${want}\n  ${hint}`);
+  process.exit(1);
+}
 
 const graph = new WikiGraph(join(GRAPH_DIR, `${WIKI}.csr`), join(GRAPH_DIR, `${WIKI}.db`));
 console.log(`wikigraph: ${WIKI} — ${graph.n.toLocaleString()} articles, ` +
