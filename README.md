@@ -40,11 +40,15 @@ frame uses `location.replace()` and the panel keeps its own stack, so the browse
 button is the disc's alone. The divider drags; the width is remembered. Under 900px the
 panel overlays rather than squeezes. Middle-click or ↗ still opens a tab.
 
-**The detail card shows the article's first paragraph.** Kiwix sits behind the same
-hostname, so the page fetches the article itself — same origin, no proxy — and takes the
-first real paragraph out of mwoffliner's HTML: past the hatnotes, past the infobox. Cached
-per title for the session; a fetch is abandoned the moment the selection moves on. With no
-ZIM configured the card simply has no preview, as it has no read button.
+**The detail card shows the article's first paragraph and its lead image.** Kiwix sits
+behind the same hostname, so the page fetches the article itself — same origin, no proxy —
+and takes the first real paragraph out of mwoffliner's HTML: past the hatnotes, past the
+infobox. The image is the infobox's first photograph, or failing that its first large
+drawing (a country's locator map), and only then a thumbnail from the body; mwoffliner tags
+every image `bitmap` or `drawing`, which is what keeps a flag or a signature from being
+chosen. Cached per title for the session; a fetch is abandoned the moment the selection
+moves on. Images need a *maxi* ZIM; with a *nopic* one the card has the paragraph alone,
+and with no ZIM at all it has neither, as it has no read button.
 
 **Surprise me** picks a random article that passes the current filters and is linked to at
 least twenty times — a starting point with somewhere to go — and draws around it. With

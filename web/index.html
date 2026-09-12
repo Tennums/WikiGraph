@@ -600,23 +600,41 @@ function showPreview(el, preview) {
 }
 
 /**
- * The article's lead image: the first picture in the infobox or the first thumbnail,
- * skipping the icons that share those places -- flags, coats of arms, the little
- * "edit" and "listen" symbols. Only a maxi ZIM has images at all; on a nopic ZIM this
- * finds nothing and the card is as before.
+ * The article's lead image: the first photograph in the infobox or a thumbnail, and
+ * failing that a large drawing (a map, say). mwoffliner tags every image with
+ * data-file-type -- "bitmap" for photographs, "drawing" for flags, seals, signatures,
+ * maps -- which is a far better signal than size for what a country's infobox leads
+ * with: the flag comes first, and it is never the picture you want on a card. Only a
+ * maxi ZIM has images; on a nopic ZIM this finds nothing and the card is as before.
  */
 function leadImage(doc, articleUrl) {
   const root = doc.querySelector("#mw-content-text") ?? doc.body;
-  for (const img of root.querySelectorAll(".infobox img, .thumb img, figure img, .thumbimage")) {
-    const w = Number(img.getAttribute("width")) || 0, h = Number(img.getAttribute("height")) || 0;
+  const usable = (img) => {
     const src = img.getAttribute("src") ?? "";
-    // Icons are small, and mwoffliner keeps the source dimensions on the tag.
-    if ((w && w < 60) || (h && h < 60)) continue;
-    if (/\.svg(\.|$)/i.test(src) && (w < 120 || h < 120)) continue;  // flags, seals, symbols
-    if (!src || /^data:/.test(src)) continue;
-    try { return new URL(src, articleUrl).href; } catch { continue; }
-  }
-  return null;
+    if (!src || /^data:/.test(src) || img.classList.contains("mw-invert")) return null;  // formulae
+    const w = Number(img.getAttribute("width")) || 0, h = Number(img.getAttribute("height")) || 0;
+    if ((w && w < 60) || (h && h < 60)) return null;                                      // icons
+    let href;
+    try { href = new URL(src, articleUrl).href; } catch { return null; }
+    const type = img.dataset.fileType ?? (/\.svg(\.|$)/i.test(src) ? "drawing" : "bitmap");
+    return { href, type, big: w >= 200 && h >= 150 };
+  };
+  // The infobox is exhausted first -- a photograph, else a large drawing such as the
+  // locator map -- before the article body is considered. Otherwise a country, whose
+  // infobox holds only flags and a map, gets whichever photograph appears first in its
+  // history section.
+  const pick = (imgs, allowDrawing) => {
+    let drawing = null;
+    for (const img of imgs) {
+      const c = usable(img);
+      if (!c) continue;
+      if (c.type === "bitmap") return c.href;
+      if (allowDrawing && !drawing && c.big) drawing = c.href;
+    }
+    return drawing;
+  };
+  return pick(root.querySelectorAll(".infobox img"), true)
+      ?? pick(root.querySelectorAll(".thumb img, figure img, .thumbimage"), false);
 }
 
 function firstParagraph(doc) {
