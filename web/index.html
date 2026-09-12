@@ -28,6 +28,9 @@
   #hide label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer;
                 white-space: nowrap; }
   #hide input { margin: 0; accent-color: #9fd0ff; }
+  #mutualLabel { display: inline-flex; gap: 4px; align-items: center; cursor: pointer;
+                 white-space: nowrap; padding-left: 10px; border-left: 1px solid #2c313a; }
+  #mutualLabel input { margin: 0; accent-color: #9fd0ff; }
   #status { margin-left: auto; color: #8b93a1; }
   #status.err { color: #ff8b8b; }
 
@@ -74,6 +77,10 @@
     <label><input type="checkbox" value="infra" checked> infobox links</label>
   </span>
 
+  <label id="mutualLabel" title="Draw and follow only links that go both ways. A one-way link is a mention; a mutual one means the two articles are about each other.">
+    <input type="checkbox" id="mutual"> mutual links only
+  </label>
+
   <span id="status">loading…</span>
 </div>
 
@@ -118,6 +125,7 @@ function readHash() {
     const on = new Set(h.get("hide").split(","));
     for (const b of hideBoxes()) b.checked = on.has(b.value);
   }
+  $("mutual").checked = h.get("mutual") === "1";
   return true;
 }
 
@@ -132,6 +140,7 @@ function writeHash(push) {
     h.set(f, $(f).value.trim());
   }
   h.set("hide", hideValue());
+  if ($("mutual").checked) h.set("mutual", "1");
   const next = "#" + h.toString();
   if (next === location.hash) return;
   if (push) history.pushState(null, "", next); else history.replaceState(null, "", next);
@@ -144,7 +153,7 @@ async function draw({ push = true } = {}) {
   writeHash(push);
 
   const t = encodeURIComponent(q);
-  const hide = `&hide=${hideValue()}`;
+  const hide = `&hide=${hideValue()}` + ($("mutual").checked ? "&mutual=1" : "");
   const url = (
     view === "top" ? `api/view/top?limit=${limit}`
     : view === "category" ? `api/view/category?title=${t}&limit=${limit}&depth=3`
@@ -308,6 +317,7 @@ for (const b of hideBoxes()) {
   if (n !== undefined) b.parentElement.title = `${n.toLocaleString()} pages`;
   b.addEventListener("change", () => draw());
 }
+$("mutual").addEventListener("change", () => draw());
 
 readHash();
 syncControls();

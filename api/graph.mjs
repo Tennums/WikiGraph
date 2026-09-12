@@ -76,6 +76,18 @@ class Csr {
   }
 }
 
+/** Intersection of two sorted, unique Int32Arrays, by merge. */
+function intersectSorted(a, b) {
+  const out = new Int32Array(Math.min(a.length, b.length));
+  let i = 0, j = 0, k = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] < b[j]) i++;
+    else if (a[i] > b[j]) j++;
+    else { out[k++] = a[i]; i++; j++; }
+  }
+  return out.subarray(0, k);
+}
+
 /** Node kinds, as the ingest writes them into <wiki>.kind. */
 export const KIND = { article: 0, list: 1, date: 2, dab: 3, infra: 4 };
 export const KIND_NAMES = ["article", "list", "date", "dab", "infra"];
@@ -151,6 +163,17 @@ export class WikiGraph {
 
   /** Out-neighbours; kept under the old name because toVaultData draws edges from it. */
   neighbours(idx) { return this.out.neighbours(idx); }
+
+  /**
+   * Articles that link to `idx` AND that `idx` links to.
+   *
+   * A one-way link is a mention -- an infobox field, a passing reference. A link in
+   * both directions means the two articles are about each other. Both neighbour lists
+   * are sorted and unique, so this is one linear merge.
+   */
+  mutual(idx) {
+    return intersectSorted(this.out.neighbours(idx), this.in.neighbours(idx));
+  }
 
   /** Resolve a human title ("Isaac Newton" or "Isaac_Newton") to a node index. */
   lookup(title) {
@@ -232,13 +255,14 @@ export class WikiGraph {
    * wiki cares about, and the result is stable across runs.
    *
    * `direction` is which links to follow: "out" (what this article cites), "in" (what
-   * cites it -- "what links here"), or "both".
+   * cites it -- "what links here"), "both", or "mutual" (only links that go both ways).
    */
   neighborhood(seed, { hops = 2, limit = 3000, direction = "both", hide = [] } = {}) {
     const ok = this.allow(hide);
     const expand = (u) => {
       if (direction === "out") return [this.out.neighbours(u)];
       if (direction === "in") return [this.in.neighbours(u)];
+      if (direction === "mutual") return [this.mutual(u)];
       return [this.out.neighbours(u), this.in.neighbours(u)];
     };
     const seen = new Map([[seed, 0]]);
@@ -270,11 +294,14 @@ export class WikiGraph {
    * target would read most of the graph; meeting in the middle keeps both frontiers
    * to a few thousand articles. Returns the path as node ids, or null.
    */
-  path(a, b, { maxDepth = 8, maxVisited = 4_000_000, hide = [] } = {}) {
+  path(a, b, { maxDepth = 8, maxVisited = 4_000_000, hide = [], mutual = false } = {}) {
     if (a === b) return [a];
     // The endpoints are the user's choice and always allowed; a hidden kind is only
     // refused as a stepping stone. Without this every path went through a list page.
     const ok = this.allow(hide);
+    // A mutual-only path is a chain of articles that each refer back to the previous
+    // one: rarer, longer, and much more meaningful than a chain of mentions.
+    const step = mutual ? (u) => this.mutual(u) : null;
     const fwd = new Map([[a, -1]]);   // node -> parent towards a
     const bwd = new Map([[b, -1]]);   // node -> parent towards b
     let fFront = [a], bFront = [b];
@@ -296,7 +323,7 @@ export class WikiGraph {
         ? [fFront, fwd, bwd, this.out] : [bFront, bwd, fwd, this.in];
       const next = [];
       for (const u of front) {
-        for (const v of csr.neighbours(u)) {
+        for (const v of step ? step(u) : csr.neighbours(u)) {
           if (own.has(v)) continue;
           if (!ok(v) && v !== a && v !== b) continue;
           own.set(v, u);
@@ -381,10 +408,11 @@ export class WikiGraph {
   /**
    * @param {number[]} ids
    * @param {{ title: string, wedgeOf?: Map<number,number>, wedges?: number,
-   *           depth?: Map<number,number>, typeOf?: (id: number) => string }} opts
+   *           depth?: Map<number,number>, typeOf?: (id: number) => string,
+   *           mutual?: boolean }} opts
    */
   toVaultData(ids, opts) {
-    const { title, wedgeOf, wedges = 12, depth, typeOf } = opts;
+    const { title, wedgeOf, wedges = 12, depth, typeOf, mutual = false } = opts;
     const pos = new Map(ids.map((id, i) => [id, i]));
     const ph = ids.map(() => "?").join(",");
 
@@ -476,12 +504,29 @@ export class WikiGraph {
     // made the cut. Degree is recomputed over what is actually shown, because the disc
     // rings notes by the degree it can see -- a global degree would push articles to
     // the centre for links to nodes that are not on screen.
+    // With `mutual` an edge is drawn only if it exists in both directions. The first
+    // pass collects every directed link inside the selection; the second keeps a pair
+    // when its reverse was also seen. Keyed on the selection positions, which are
+    // small, rather than on node ids.
     const edges = [];
+    const seen = mutual ? new Set() : null;
+    const n = ids.length;
     for (const id of ids) {
       const from = pos.get(id);
       for (const v of this.neighbours(id)) {
         const to = pos.get(v);
-        if (to === undefined || to <= from) continue; // undirected, once
+        if (to === undefined || to === from) continue;
+        if (mutual) { seen.add(from * n + to); continue; }
+        if (to < from) continue; // undirected, once
+        edges.push({ s: from, t: to, w: 1 });
+        nodes[from].deg++;
+        nodes[to].deg++;
+      }
+    }
+    if (mutual) {
+      for (const key of seen) {
+        const from = Math.floor(key / n), to = key % n;
+        if (to < from || !seen.has(to * n + from)) continue;
         edges.push({ s: from, t: to, w: 1 });
         nodes[from].deg++;
         nodes[to].deg++;

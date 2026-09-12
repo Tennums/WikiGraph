@@ -68,6 +68,16 @@ Germany, City…`.
 A hidden kind is refused as a stepping stone in a path search but never as an endpoint:
 the endpoints are the user's choice.
 
+**Mutual links only** keeps a link only when it goes both ways. A one-way link is a
+mention — an infobox field, a passing reference; a mutual one means the two articles are
+about each other. With the toggle on, the neighbourhood BFS follows only mutual links, the
+disc draws only mutual edges, and a path is a chain of articles that each refer back to
+the previous one. On simplewiki, *Around Physics* at one hop drops from 300 articles and
+7,250 links to 85 and 314, and *Quantum mechanics* enters the top ten as the navbox
+physicists leave; the two-hop mutual neighbourhood shares only a third of its articles with
+the ordinary one and 87% of its internal links are reciprocal. The path *Cheese → History →
+Science → Black hole* becomes *Cheese → Bacteria → Water → Universe → Black hole*.
+
 **Search is a title index**, FTS5 in its own sidecar `<wiki>.search.db`: each word typed
 becomes a prefix term, case-insensitive with diacritics folded, ranked by in-degree. So
 "einstein" finds *Albert Einstein* first, "alb ein" finds it too, and "zurich" finds
