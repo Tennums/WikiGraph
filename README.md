@@ -82,6 +82,13 @@ Every view is a URL. The controls mirror into the hash —
 and the browser's back button retraces a walk. The detail card's **Draw around this**
 makes the article the new centre; each click is a page in the history.
 
+**Saved views** are the same URLs, kept. ★ in the bar saves what is on screen under the
+disc's own heading (*Cheese → Black hole (3 hops)*), and turns off again on a view that is
+already saved; *Saved (n)* lists them, newest first, each a click back, × forgets one. In
+`localStorage`, so per browser and per origin, and nothing goes through the API; *Export*
+writes the list as JSON and *Import* merges one in, keyed on the hash, for moving between
+machines.
+
 **In-degree is the importance signal throughout** — how the disc ranks a BFS frontier, a
 search hit, and the "most linked-to" list. Out-degree measures how much an article lists,
 and lists win it: by out-degree simplewiki's top articles are `List of municipalities in

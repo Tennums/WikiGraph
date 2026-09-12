@@ -43,6 +43,26 @@
   #status { margin-left: auto; color: #8b93a1; }
   #status.err { color: #ff8b8b; }
 
+  /* Saved views: a star that saves what is on screen, a list that brings one back. */
+  #star { padding: 4px 7px; }
+  #star.on { color: #ffd166; }
+  #savedPanel { position: fixed; z-index: 30; min-width: 280px; max-width: 460px; max-height: 60vh;
+                display: flex; flex-direction: column; background: #1b1e24; color: #e8e8ea;
+                border: 1px solid #333944; border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+  #savedPanel[hidden] { display: none; }
+  #savedList { overflow-y: auto; margin: 0; padding: 4px 0; list-style: none; }
+  #savedList li { display: flex; align-items: center; gap: 6px; padding: 0 6px; }
+  #savedList li:hover { background: #23272f; }
+  #savedList a { flex: 1; min-width: 0; padding: 5px 4px; color: #e8e8ea; text-decoration: none;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #savedList a.here { color: #9fd0ff; }
+  #savedList small { color: #8b93a1; white-space: nowrap; }
+  #savedList button { padding: 0 6px; color: #8b93a1; background: transparent; border-color: transparent; }
+  #savedList button:hover { color: #ff8b8b; border-color: #333944; }
+  #savedEmpty { padding: 10px 12px; color: #8b93a1; }
+  #savedFoot { display: flex; gap: 6px; padding: 6px; border-top: 1px solid #2c313a; }
+  #savedFoot button { padding: 2px 8px; }
+
   #trail { display: flex; gap: 6px; align-items: center; padding: 4px 12px;
            background: #181b20; border-bottom: 1px solid #2c313a; color: #8b93a1;
            font-size: 12px; overflow: hidden; white-space: nowrap; }
@@ -130,6 +150,8 @@
   <button id="go">Draw</button>
   <button id="random" title="A random well-linked article as the centre, respecting the filters. With 'Draw around this' on the card, an aimless walk.">&#127922; Surprise me</button>
   <button id="play" title="Six degrees: two random articles; get from one to the other by clicking 'Draw around this', then see how your route compares with the shortest.">&#127919; Six degrees</button>
+  <button id="star" title="Save this view in this browser" aria-label="Save this view">&#9734;</button>
+  <button id="savedBtn" title="Saved views">Saved</button>
 
   <label for="group" title="Topic: how the wiki files these articles. Cluster: how they actually hang together, by modularity on the links drawn — each wedge named after its three most linked-to members. Hop distance: the shells of the neighbourhood — the seed, what it links to, what those link to.">Wedges</label>
   <select id="group">
@@ -178,6 +200,16 @@
   <datalist id="cathits"></datalist>
 
   <span id="status">loading…</span>
+</div>
+
+<div id="savedPanel" hidden>
+  <ul id="savedList"></ul>
+  <div id="savedEmpty" hidden>Nothing saved yet. &#9734; keeps the view on screen.</div>
+  <div id="savedFoot">
+    <button id="savedExport" title="Download the list as JSON">Export</button>
+    <button id="savedImport" title="Add views from an exported JSON file">Import</button>
+    <input type="file" id="savedFile" accept="application/json,.json" hidden>
+  </div>
 </div>
 
 <div id="trail" hidden>
@@ -384,6 +416,7 @@ async function draw({ push = true, fromGame = false } = {}) {
 
   // The seed's canonical title (it is the pinned node), not what was typed.
   trailRecord(view, data.pinned?.length ? data.nodes[Number(data.pinned[0])].label : q);
+  saved.drawn(data.vault);
 
   status((data.within ? `${data.within.articles.toLocaleString()} articles under ${data.within.name} · ` : "") +
          (data.pathTitles ? data.pathTitles.join(" → ") + " · " : "") +
@@ -920,6 +953,119 @@ if (info.pagerank === false) {
 if (info.minLenDefault !== undefined && !location.hash.includes("minlen=")) {
   $("minlen").value = String(info.minLenDefault);
 }
+
+/**
+ * Saved views. Every view is a URL; this keeps a list of them in the browser. The star
+ * saves what is on screen under the title the server gave it (the disc's heading),
+ * and toggles off again if that exact view is already saved. Bringing one back is
+ * setting the hash, which the back-button handler already turns into a draw. Per
+ * browser and per origin -- localStorage -- so nothing goes through the API; export
+ * and import as JSON is how a list moves between machines.
+ */
+const saved = {
+  KEY: "wikigraph.saved",
+  title: "",                      // of the view on screen, from the last draw
+  list() {
+    try { const v = JSON.parse(localStorage.getItem(this.KEY) ?? "[]"); return Array.isArray(v) ? v : []; }
+    catch { return []; }
+  },
+  store(items) {
+    try { localStorage.setItem(this.KEY, JSON.stringify(items)); }
+    catch (e) { status(`could not save: ${e.message}`, true); }
+    this.render();
+  },
+  here() { return location.hash; },
+  has(hash = this.here()) { return this.list().some((s) => s.hash === hash); },
+  drawn(title) { this.title = title ?? ""; this.render(); },
+  toggle() {
+    const hash = this.here();
+    if (!hash) return;
+    if (this.has(hash)) { this.store(this.list().filter((s) => s.hash !== hash)); return; }
+    const title = this.title || $("q").value.trim() || $("view").selectedOptions[0].text;
+    this.store([{ hash, title, at: new Date().toISOString() }, ...this.list()]);
+  },
+  remove(hash) { this.store(this.list().filter((s) => s.hash !== hash)); },
+  open(hash) {
+    this.hide();
+    if (hash === location.hash) return;
+    history.pushState(null, "", hash);
+    readHash(); syncControls();
+    draw({ push: false });
+  },
+  // The star reflects the view on screen; the list is redrawn from storage each time,
+  // which is cheap and keeps it honest across tabs of the same browser.
+  render() {
+    const items = this.list();
+    const on = this.has();
+    $("star").classList.toggle("on", on);
+    $("star").innerHTML = on ? "&#9733;" : "&#9734;";
+    $("star").title = on ? "Saved — click to forget" : "Save this view in this browser";
+    $("savedBtn").textContent = items.length ? `Saved (${items.length})` : "Saved";
+    $("savedEmpty").hidden = items.length > 0;
+    $("savedExport").disabled = !items.length;
+    const here = this.here();
+    $("savedList").replaceChildren(...items.map((s) => {
+      const li = document.createElement("li");
+      const a = document.createElement("a");
+      a.href = s.hash; a.textContent = s.title; a.title = decodeURIComponent(s.hash.slice(1)).replace(/&/g, "  ");
+      a.classList.toggle("here", s.hash === here);
+      a.addEventListener("click", (e) => { e.preventDefault(); this.open(s.hash); });
+      const when = document.createElement("small");
+      when.textContent = s.at ? new Date(s.at).toLocaleDateString() : "";
+      const x = document.createElement("button");
+      x.innerHTML = "&times;"; x.title = "Forget this view"; x.setAttribute("aria-label", `Forget ${s.title}`);
+      x.addEventListener("click", () => this.remove(s.hash));
+      li.append(a, when, x);
+      return li;
+    }));
+  },
+  show() {
+    this.render();
+    const p = $("savedPanel"), r = $("savedBtn").getBoundingClientRect();
+    p.hidden = false;
+    p.style.top = `${r.bottom + 4}px`;
+    p.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - p.offsetWidth - 8))}px`;
+  },
+  hide() { $("savedPanel").hidden = true; },
+  export() {
+    const blob = new Blob([JSON.stringify({ wikigraph: info.wiki ?? "", saved: this.list() }, null, 2)],
+                          { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `wikigraph-${info.wiki ?? "views"}-saved.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  },
+  // Merge, keyed on the hash: what is already here stays first, the file's views
+  // follow, and a view in both is not doubled.
+  async import(file) {
+    let items;
+    try {
+      const v = JSON.parse(await file.text());
+      items = Array.isArray(v) ? v : v?.saved;
+      if (!Array.isArray(items)) throw new Error("not a saved-views file");
+    } catch (e) { status(`import failed: ${e.message}`, true); return; }
+    const have = new Set(this.list().map((s) => s.hash));
+    const add = items.filter((s) => s && typeof s.hash === "string" && s.hash.startsWith("#") && !have.has(s.hash))
+                     .map((s) => ({ hash: s.hash, title: String(s.title ?? s.hash), at: s.at ?? new Date().toISOString() }));
+    this.store([...this.list(), ...add]);
+    status(`${add.length} view${add.length === 1 ? "" : "s"} imported`);
+  },
+};
+$("star").addEventListener("click", () => saved.toggle());
+$("savedBtn").addEventListener("click", () => ($("savedPanel").hidden ? saved.show() : saved.hide()));
+$("savedExport").addEventListener("click", () => saved.export());
+$("savedImport").addEventListener("click", () => $("savedFile").click());
+$("savedFile").addEventListener("change", async (e) => {
+  if (e.target.files[0]) await saved.import(e.target.files[0]);
+  e.target.value = "";
+});
+// The list closes like a menu: a click elsewhere, or Escape.
+document.addEventListener("click", (e) => {
+  if (!$("savedPanel").hidden && !$("savedPanel").contains(e.target) && e.target !== $("savedBtn")) saved.hide();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") saved.hide(); });
+saved.render();
 
 readHash();
 syncControls();
