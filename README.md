@@ -29,6 +29,7 @@ thousand articles chosen for a reason:
 | **Common ground of two** | what both link to, and who links to both — the overlap rather than the chain; both seeds pinned | subject area |
 | **Category tree** | everything under a category, N levels deep | direct subcategories |
 | **Most linked-to** | the top articles by in-degree | subject area |
+| **Articles that mention** | every article whose *text* contains the words, from the ZIM's own full-text index, in Kiwix's ranking; the first hit is the largest dot | subject area |
 
 **Read the article beside the disc.** The card's *Read the article* opens a panel on the
 right — an iframe onto Kiwix, same origin, so the frame is ours to read — with the disc
@@ -81,6 +82,14 @@ Every view is a URL. The controls mirror into the hash —
 `#view=path&q=Cheese&q2=Black+hole&limit=1000` — so a view can be bookmarked or sent,
 and the browser's back button retraces a walk. The detail card's **Draw around this**
 makes the article the new centre; each click is a page in the history.
+
+**Full text, not just titles.** The ZIM carries a Xapian index and kiwix-serve exposes it
+as an RSS feed (`/search?…&format=xml`, 140 hits a page), so *Articles that mention
+"Antwerp"* is the page asking Kiwix for the first thousand hits, four pages in flight at a
+time, and posting the titles to `/api/view/set`, which resolves them, applies the filters,
+and draws the induced subgraph. On simplewiki: 720 articles mention it, 645 pass the
+filters, 1.4 s; the biggest dots are the province, the football club and the city. The
+option is only offered when a reader is configured — there is no index without the ZIM.
 
 **Why does A link to B.** A link is a line on the disc; the sentence behind it is the
 argument. *?* beside a neighbour on the card fetches the article from Kiwix, finds the first

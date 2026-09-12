@@ -145,6 +145,7 @@
     <option value="common">Common ground of two</option>
     <option value="category">Category tree</option>
     <option value="top">Most linked-to</option>
+    <option value="text" id="viewText">Articles that mention</option>
   </select>
 
   <input type="text" id="q" list="hits" placeholder="Physics" value="Physics">
@@ -374,8 +375,22 @@ async function draw({ push = true, fromGame = false } = {}) {
   const t0 = performance.now();
   let data;
   try {
-    const res = await fetch(url);
-    data = await res.json();
+    let res;
+    if (view === "text") {
+      // Kiwix's index answers "which articles mention this"; the graph answers how
+      // they hang together. Hits in Kiwix's order, then the set drawn as a disc.
+      const hits = await textHits(q, Number(limit));
+      if (!hits.titles.length) throw new Error(`no article mentions "${q}"`);
+      res = await fetch(`api/view/set?limit=${limit}${hide}`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ titles: hits.titles, title: `Articles that mention "${q}"` }),
+      });
+      data = await res.json();
+      if (res.ok) data.textHits = hits.total;
+    } else {
+      res = await fetch(url);
+      data = await res.json();
+    }
     if (!res.ok) throw new Error(data.error ?? res.statusText);
   } catch (e) {
     status(e.message, true);
@@ -455,7 +470,9 @@ async function draw({ push = true, fromGame = false } = {}) {
   pathWhy(data.pathTitles);
   saved.drawn(data.vault);
 
-  status((data.within ? `${data.within.articles.toLocaleString()} articles under ${data.within.name} · ` : "") +
+  status((data.textHits !== undefined ? `${data.textHits.toLocaleString()} articles mention it · ` +
+           (data.set.filtered ? `${data.set.filtered} filtered · ` : "") : "") +
+         (data.within ? `${data.within.articles.toLocaleString()} articles under ${data.within.name} · ` : "") +
          (data.pathTitles ? data.pathTitles.join(" → ") + " · " : "") +
          (data.common ? `both link to ${data.common.cited}, ${data.common.citing} link to both · ` : "") +
          `${data.nodes.length.toLocaleString()} articles · ` +
@@ -873,6 +890,38 @@ function leadImage(doc, articleUrl) {
 }
 
 /**
+ * Kiwix's full-text search, paged. Its RSS form lists a <link> per hit and the total;
+ * pages are 140 hits at most, so a budget of 1,000 is eight requests, sent a few at
+ * a time. Titles come back in Kiwix's ranking, which is what the disc sizes dots by.
+ */
+async function textHits(pattern, want) {
+  const PAGE = 140;
+  const page = async (start) => {
+    const url = `${info.textSearch}&pattern=${encodeURIComponent(pattern)}&start=${start}&pageLength=${PAGE}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Kiwix search failed (${res.status})`);
+    const doc = new DOMParser().parseFromString(await res.text(), "text/xml");
+    const total = Number(doc.getElementsByTagNameNS("*", "totalResults")[0]?.textContent ?? 0);
+    const titles = [...doc.querySelectorAll("item > link")].map((l) => {
+      try { return decodeURIComponent(l.textContent.trim().split("/").pop()).replace(/_/g, " "); } catch { return ""; }
+    }).filter(Boolean);
+    return { total, titles };
+  };
+  const first = await page(0);
+  const titles = [...first.titles];
+  const n = Math.min(first.total, want);
+  const starts = [];
+  for (let s = PAGE; s < n; s += PAGE) starts.push(s);
+  // Four in flight at a time: kiwix-serve is single-process, and eight at once
+  // buys nothing over four.
+  for (let i = 0; i < starts.length; i += 4) {
+    const pages = await Promise.all(starts.slice(i, i + 4).map(page));
+    for (const p of pages) titles.push(...p.titles);
+  }
+  return { total: first.total, titles: titles.slice(0, want) };
+}
+
+/**
  * Articles as parsed documents, shared by the preview, the facts and the snippets.
  * A few dozen kept; the same article is asked about many times while a card is open.
  */
@@ -1205,7 +1254,8 @@ const syncControls = () => {
   const two = ["path", "common"].includes(view);
   $("q2").hidden = $("q2Label").hidden = !two;
   $("q2Label").textContent = view === "common" ? "×" : "→";
-  $("q").placeholder = view === "category" ? "Physics (category name)" : "Physics";
+  $("q").placeholder = view === "category" ? "Physics (category name)"
+                     : view === "text" ? "Antwerp (words in the text)" : "Physics";
   $("within").disabled = $("withinLabel").hidden = view === "category";
   $("within").hidden = view === "category";
 };
@@ -1241,6 +1291,11 @@ if (info.pagerank === false) {
   $("rank").hidden = $("rankLabel").hidden = true;
   $("sizePagerank").hidden = $("sizePagerank").disabled = true;
   if ($("size").value === "pagerank") $("size").value = "indegree";
+}
+// Full text needs Kiwix's index; without a reader there is nothing to ask.
+if (!info.textSearch) {
+  $("viewText").hidden = $("viewText").disabled = true;
+  if ($("view").value === "text") $("view").value = "neighborhood";
 }
 // The server's default, so a URL without minlen and the dropdown agree.
 if (info.minLenDefault !== undefined && !location.hash.includes("minlen=")) {

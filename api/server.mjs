@@ -120,6 +120,14 @@ const within = (q) => {
  * store by index, which is also what edges' s/t refer to. Anything handed to the page
  * that names nodes (pins) has to be translated.
  */
+/** A JSON request body, capped at 4 MB; anything else is an empty object. */
+const readJson = (req) => new Promise((resolve) => {
+  const chunks = []; let size = 0;
+  req.on("data", (c) => { size += c.length; if (size <= 4e6) chunks.push(c); });
+  req.on("end", () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8"))); } catch { resolve({}); } });
+  req.on("error", () => resolve({}));
+});
+
 const positionsOf = (ids, articleIds) => {
   const pos = new Map(ids.map((id, i) => [id, i]));
   return articleIds.map((a) => pos.get(a)).filter((i) => i !== undefined).map(String);
@@ -196,7 +204,49 @@ const server = createServer(async (req, res) => {
           // kiwix-serve exposes an article at /content/<book>/<Title>. The book name
           // is the ZIM's filename without its extension.
           reader: KIWIX_URL && KIWIX_BOOK ? `${KIWIX_URL}/content/${KIWIX_BOOK}` : null,
+          // And its full-text search, an RSS feed of hits over the ZIM's own index:
+          // append &pattern=...&start=...&pageLength=... (140 per page at most).
+          textSearch: KIWIX_URL && KIWIX_BOOK ? `${KIWIX_URL}/search?content=${KIWIX_BOOK}&format=xml` : null,
         });
+
+      /* An explicit list of titles drawn as a disc -- the page's full-text view sends
+         Kiwix's hits here. Titles in the order the caller ranks them; that order becomes
+         the dot size (first hit largest) unless a size lens is chosen. Filters apply,
+         except that they cannot be told apart from "not an article" here, so the count
+         of titles that did not resolve is returned as `unresolved`. */
+      case "/api/view/set": {
+        if (req.method !== "POST") return json(res, 405, { error: "POST a JSON body {titles, title}" });
+        const body = await readJson(req);
+        if (!Array.isArray(body?.titles)) return json(res, 400, { error: "titles: string[] required" });
+        const w = within(q);
+        if (w.error) return json(res, 404, { error: w.error });
+        const ok = graph.allow(hidden(q), minLen(q), w.mask);
+        const limit = budget(q.get("limit"), 2000);
+        const ids = [], rank = new Map();
+        let unresolved = 0, filtered = 0;
+        for (const t of body.titles.slice(0, 20000)) {
+          if (ids.length >= limit) break;
+          const i = graph.lookup(String(t));
+          if (i < 0) { unresolved++; continue; }
+          if (rank.has(i)) continue;
+          if (!ok(i)) { filtered++; continue; }
+          rank.set(i, ids.length); ids.push(i);
+        }
+        if (!ids.length) return json(res, 404, { error: "none of the titles is an article that passes the filters" });
+        const data = graph.toVaultData(ids, {
+          title: String(body.title ?? "a set of articles").slice(0, 200) + (w.name ? ` · within ${w.name}` : ""),
+          mutual: wantMutual(q), group: groupBy(q), size: sizeBy(q),
+          typeOf: (id) => `hit #${rank.get(id) + 1}`,
+        });
+        if (sizeBy(q) === "degree") {
+          // Rank as size: the first hit the largest, the tail small but not vanishing.
+          const n = ids.length;
+          data.nodes.forEach((node, i) => { node.size = Number((1 - Math.log1p(i) / Math.log1p(n)).toFixed(3)); });
+        }
+        data.set = { given: body.titles.length, drawn: ids.length, unresolved, filtered };
+        if (w.mask) data.within = { name: w.name, articles: w.mask.count, categories: w.mask.categories };
+        return json(res, 200, data);
+      }
 
       case "/api/search": {
         if (q.get("kind") === "category") {
