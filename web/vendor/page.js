@@ -5822,6 +5822,69 @@ function mountVaultGraph(root, data, deps) {
     setSheet(sheetOpen, true);
     setBand(bandOpen, true);
     $("png").onclick = savePng;
+
+    /* Export what is on the disc -- by willShow(), the test the planner uses for a
+       dot at rest: hidden topics, hidden subgroups and the date range all leave an
+       article out of the file. Not present(), which reads the animated alpha and so
+       reports whatever has faded in on the current frame; an export mid-intro came
+       back with 38 of 600 articles. Titles rather than ids in the edge list, since a
+       spreadsheet is the likely destination.
+
+       Edges come from DATA, not the store: past EDGE_RAMP_START the store keeps only
+       a share of them for drawing (see lazyEdges), so an export from the store would
+       be silently short -- 2,592 of 8,014 on a 600-node view. */
+    function exportView() {
+      var nodes = [], index = {};
+      DATA.nodes.forEach(function (a, i) {
+        // The store keys nodes by their position in DATA.nodes, which is also what
+        // DATA.edges' s/t refer to -- not by the id field.
+        var id = String(i);
+        if (!graph.hasNode(id) || !willShow(id)) return;
+        index[i] = nodes.length;
+        nodes.push({
+          title: a.label, wedge: groupOf(id), type: a.type || "",
+          kind: (a.tags && a.tags[0]) || "article",
+          links_on_disc: graph.getNodeAttribute(id, "deg") || 0,
+          words: a.words || 0, last_edited: a.created || "",
+        });
+      });
+      var edges = [];
+      DATA.edges.forEach(function (e) {
+        if (index[e.s] === undefined || index[e.t] === undefined) return;
+        edges.push({ source: DATA.nodes[e.s].label, target: DATA.nodes[e.t].label });
+      });
+      return { view: DATA.vault, exported: new Date().toISOString(), nodes: nodes, edges: edges };
+    }
+    /** @param {Array<Record<string, unknown>>} rows */
+    function toCsv(rows) {
+      if (!rows.length) return "";
+      var cols = Object.keys(rows[0]);
+      var cell = function (v) {
+        var s = String(v == null ? "" : v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      };
+      return [cols.join(",")].concat(rows.map(function (r) {
+        return cols.map(function (c) { return cell(r[c]); }).join(",");
+      })).join("\n") + "\n";
+    }
+    /** @param {string} name @param {string} mime @param {string} text */
+    function download(name, mime, text) {
+      var a = DOC.createElement("a");
+      a.href = URL.createObjectURL(new Blob([text], { type: mime }));
+      a.download = name;
+      a.click();
+      WIN.setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+    }
+    var slug = function () { return String(DATA.vault).replace(/[^\w]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "wikigraph"; };
+    if ($("csv")) $("csv").onclick = function () {
+      var v = exportView();
+      download(slug() + "-nodes.csv", "text/csv;charset=utf-8", toCsv(v.nodes));
+      WIN.setTimeout(function () { download(slug() + "-edges.csv", "text/csv;charset=utf-8", toCsv(v.edges)); }, 150);
+    };
+    if ($("json")) $("json").onclick = function () {
+      download(slug() + ".json", "application/json;charset=utf-8", JSON.stringify(exportView(), null, 2));
+    };
+
     if ($("dbg")) $("dbg").onclick = function () {
       var txt = JSON.stringify(API.debugDump(), null, 2);
       /** @param {string} how */

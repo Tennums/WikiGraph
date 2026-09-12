@@ -11,7 +11,9 @@ three host callbacks: `deps.articleHref(label)` supplies the open button's targe
 of a hardcoded `obsidian://` URL, `deps.onRecenter(label)` adds a "Draw around this"
 button when present, and `deps.articlePreview(label, el)` is handed an empty element in
 the card to fill (here, the article's first paragraph). `page.css` gained the `.preview`
-rules beside the card's other styles. Layout, rendering and interaction are untouched.
+rules beside the card's other styles. The sidebar gained *Export CSV* / *Export JSON* beside *Save PNG*, exporting what the
+disc shows by the planner's own `willShow()` test. Layout, rendering and interaction are
+untouched.
 
 ## Pulling in an upstream release
 

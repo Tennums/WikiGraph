@@ -41,6 +41,13 @@ least twenty times — a starting point with somewhere to go — and draws aroun
 *Draw around this* on the card, that is an aimless walk through the wiki; the back button
 retraces it.
 
+**Export CSV / JSON** in the sidebar writes what is on the disc — hidden topics, hidden
+subgroups and the date range all leave an article out, exactly as they do on screen. CSV
+comes as `nodes.csv` (title, wedge, type, kind, links on disc, words, last edited) and
+`edges.csv` (source title, target title), ready for Gephi or a spreadsheet; JSON is the
+same in one file. The edge list is taken from the data the API sent, not from the
+renderer's store, which past a few thousand links keeps only a share of them for drawing.
+
 Every view is a URL. The controls mirror into the hash —
 `#view=path&q=Cheese&q2=Black+hole&limit=1000` — so a view can be bookmarked or sent,
 and the browser's back button retraces a walk. The detail card's **Draw around this**
