@@ -100,6 +100,7 @@
                background: #1b1e24; border-bottom: 1px solid #2c313a; color: #e8e8ea; }
   #readerTitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
                  white-space: nowrap; font-weight: 600; }
+  #readerOnDisc { color: #ffd166; font-size: 12px; white-space: nowrap; }
   #readerBar button, #readerBar a { padding: 2px 8px; font: inherit; color: #e8e8ea;
                                     background: #23272f; border: 1px solid #333944;
                                     border-radius: 5px; text-decoration: none; cursor: pointer; }
@@ -234,6 +235,7 @@
     <div id="readerBar">
       <button id="readerBack" title="Back, within the article panel">&#8592;</button>
       <span id="readerTitle"></span>
+      <span id="readerOnDisc" title="Links in this article to articles on the disc are underlined in gold; the mouse over one lights its dot, a click selects it"></span>
       <button id="readerRecenter" title="Redraw the disc around the article being read">&#8982; Draw around this</button>
       <a id="readerExternal" target="_blank" rel="noopener" title="Open in a new tab">&#8599;</a>
       <button id="readerClose" title="Close the article panel">&times;</button>
@@ -322,6 +324,10 @@ function writeHash(push) {
   if (push) history.pushState(null, "", next); else history.replaceState(null, "", next);
 }
 
+// The disc on screen: what mountVaultGraph returned (its `api` addresses dots by
+// title once the scene is built) and the titles it holds, for the reader to mark.
+const disc = { mounted: null, labels: new Set(), api() { return this.mounted?.api ?? null; } };
+
 async function draw({ push = true, fromGame = false } = {}) {
   // The game bar belongs to a game in progress. A draw the game did not ask for --
   // the Draw button, a changed view or filter, Surprise me, the back button -- means
@@ -366,7 +372,7 @@ async function draw({ push = true, fromGame = false } = {}) {
   $("mount").innerHTML = markup;
 
   const t1 = performance.now();
-  mountVaultGraph($("mount").querySelector("#vg-app"), data, {
+  disc.mounted = mountVaultGraph($("mount").querySelector("#vg-app"), data, {
     Graph: window.VaultGraphEngine.GraphStore,
     Renderer: window.VaultGraphEngine.Renderer,
     settingsUI: false,
@@ -395,7 +401,12 @@ async function draw({ push = true, fromGame = false } = {}) {
     // The first paragraph, from Kiwix, in the card. Only offered when a reader is
     // configured; without one the card simply has no preview block.
     articlePreview: info.reader ? articlePreview : undefined,
+    // A neighbour clicked on the card: if the article on the card is the one being
+    // read, scroll the reader to the link that made them neighbours.
+    onNeighbour: (from, to) => reader.scrollToLink(from, to),
   });
+  disc.labels = new Set(data.nodes.map((n) => n.label));
+  reader.markLinks();
   const drawn = Math.round(performance.now() - t1);
   // The legend heading is static markup; say what the wedges are this time.
   const heading = $("mount").querySelector("#vg-legend")?.previousElementSibling?.querySelector(".lbl")
@@ -471,6 +482,55 @@ const reader = {
     this.el.hidden = $("divider").hidden = true;
   },
   current() { return this.titleOf(this.frame.contentWindow?.location?.href ?? this.frame.src); },
+
+  /**
+   * The article and the disc, aware of each other. Every link in the article whose
+   * target is a dot on the disc is marked; the mouse over it lights the dot, a click
+   * selects it (and follows the link as usual -- reading is not interrupted, the disc
+   * simply keeps up). Re-run after every draw, since the disc changes under the
+   * article: the marks are the intersection of the two, not a property of either.
+   */
+  markLinks() {
+    let doc;
+    try { doc = this.open ? this.frame.contentDocument : null; } catch { doc = null; }
+    if (!doc?.body) return;
+    const here = this.frame.contentWindow.location.href;
+    const on = new Set();
+    for (const a of doc.querySelectorAll("a[href]")) {
+      a.classList.remove("wg-on-disc");
+      if (a.dataset.wgTitle === undefined) {
+        // Resolved once per link: the title a same-origin article link points at.
+        let t = "";
+        try {
+          const u = new URL(a.getAttribute("href"), here);
+          if (u.origin === location.origin && !u.hash) t = this.titleOf(u.href);
+        } catch {}
+        a.dataset.wgTitle = t;
+        if (t) {
+          a.addEventListener("mouseenter", () => { if (a.classList.contains("wg-on-disc")) disc.api()?.hover(t); });
+          a.addEventListener("mouseleave", () => { if (a.classList.contains("wg-on-disc")) disc.api()?.hover(null); });
+          a.addEventListener("click", (ev) => {
+            if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button !== 0) return;
+            if (a.classList.contains("wg-on-disc")) disc.api()?.select(t);
+          });
+        }
+      }
+      if (a.dataset.wgTitle && disc.labels.has(a.dataset.wgTitle)) { a.classList.add("wg-on-disc"); on.add(a.dataset.wgTitle); }
+    }
+    $("readerOnDisc").textContent = on.size ? `${on.size} on the disc` : "";
+  },
+  // The card's neighbour list, the other way round: the article being read is `from`,
+  // so the first link in it to `to` is where the two meet. Scroll there and flash it.
+  scrollToLink(from, to) {
+    if (!this.open || this.current() !== from) return;
+    let doc;
+    try { doc = this.frame.contentDocument; } catch { return; }
+    const a = [...doc.querySelectorAll("a[href]")].find((x) => x.dataset.wgTitle === to);
+    if (!a) return;
+    a.scrollIntoView({ block: "center", behavior: "smooth" });
+    a.classList.add("wg-flash");
+    setTimeout(() => a.classList.remove("wg-flash"), 1600);
+  },
 };
 
 /**
@@ -495,6 +555,13 @@ const READER_THEME = `
   a:hover { color: #c9e4ff !important; }
   a.new, a.new:visited { color: #ff8b8b !important; }
   a.external { color: #7fc8a9 !important; }
+  /* A link whose target is a dot on the disc: same colour, underlined in the hub's
+     gold, so the eye finds it without the text changing. */
+  a.wg-on-disc { text-decoration: underline !important; text-decoration-color: #ffd166 !important;
+                 text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+  a.wg-on-disc:hover { background: rgba(255, 209, 102, .14); border-radius: 2px; }
+  a.wg-flash { background: rgba(255, 209, 102, .35) !important; border-radius: 2px;
+               transition: background .6s; }
   .infobox, table.wikitable, .navbox, .toccolours, .sidebar, .box-Multiple_issues, .ambox,
   .mbox, .tmbox, table.metadata, .mw-collapsible, .catlinks, .mw-references-wrap, .refbegin {
     background: #1b1e24 !important; color: #e8e8ea !important; border-color: #2c313a !important;
@@ -552,6 +619,7 @@ reader.frame.addEventListener("load", () => {
   const title = reader.titleOf(url);
   if (title) $("readerTitle").textContent = title;
   $("readerExternal").href = url;
+  reader.markLinks();
   // Links off the wiki (mwoffliner keeps a "view on wikipedia.org" link, and citations)
   // leave the panel for a tab rather than steering the frame onto the internet.
   try {

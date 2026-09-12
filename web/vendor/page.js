@@ -5083,7 +5083,13 @@ function mountVaultGraph(root, data, deps) {
     var pv = d.querySelector(".preview");
     if (pv) deps.articlePreview(a.label, pv);
     Array.prototype.forEach.call(d.querySelectorAll("[data-go]"), /** @param {HTMLElement} b */ function (b) {
-      b.onclick = function () { goTo(b.getAttribute("data-go")); };
+      b.onclick = function () {
+        var to = b.getAttribute("data-go");
+        goTo(to);
+        // wikigraph: the host may be showing the article this card is about, and can
+        // then scroll it to the link that made this neighbour a neighbour.
+        if (typeof deps.onNeighbour === "function") deps.onNeighbour(a.label, graph.getNodeAttribute(to, "label"));
+      };
     });
     Array.prototype.forEach.call(d.querySelectorAll("[data-tr]"), /** @param {HTMLElement} b */ function (b) {
       b.onclick = function () { trailBackTo(+b.getAttribute("data-tr")); };
@@ -8280,7 +8286,22 @@ function mountVaultGraph(root, data, deps) {
   var bootTimer = WIN.setTimeout(function () {
     if (dead) return;
     makeRenderer();
+    // wikigraph: the host addresses dots by article title -- the reader panel marks
+    // the links in an article that are on the disc, lights the dot under the mouse,
+    // and selects it on a click. Same paths as the mouse takes on the disc itself.
+    var idByLabel = dict();
+    graph.forEachNode(function (id, a) { idByLabel[a.label] = id; });
     API = window.__vg = { graph: graph,
+                    idOf: /** @param {string} label */ function (label) { return idByLabel[label] || null; },
+                    hover: /** @param {string | null} label */ function (label) {
+                      var id = label ? idByLabel[label] : null;
+                      if (id) { state.hovered = id; syncLazyEdges(); hoverTo(1); }
+                      else hoverTo(0);
+                    },
+                    select: /** @param {string} label */ function (label) {
+                      var id = idByLabel[label];
+                      if (id) goTo(id);
+                    },
                     readTheme: readTheme, get renderer() { return renderer; },
                     placeLogo: placeLogo,
                     palette: paletteInfo,

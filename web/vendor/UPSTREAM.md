@@ -15,7 +15,10 @@ receives a plain click on the open button (modifier-clicks still follow the href
 rules beside the card's other styles. The sidebar gained *Export CSV* / *Export JSON* beside *Save PNG*, exporting what the
 disc shows by the planner's own `willShow()` test. A node may carry an optional `size` (0..1);
 when it does, the dot's radius comes from it rather than from the degree, which still
-places the dot. Layout, rendering and interaction are otherwise untouched.
+places the dot. The object `mountVaultGraph` returns exposes `api.idOf(label)`, `api.hover(label)`
+and `api.select(label)`, so the host can address dots by title, and the card's neighbour
+list calls `deps.onNeighbour(from, to)`. Layout, rendering and interaction are otherwise
+untouched.
 
 ## Pulling in an upstream release
 

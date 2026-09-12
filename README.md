@@ -82,6 +82,14 @@ Every view is a URL. The controls mirror into the hash —
 and the browser's back button retraces a walk. The detail card's **Draw around this**
 makes the article the new centre; each click is a page in the history.
 
+**The article and the disc know about each other.** Every link in the article whose target
+is a dot on the disc is underlined in gold (the reader bar counts them: *167 on the disc*
+for *Belgium* on *Around Belgium*); the mouse over one lights the dot, a click selects it
+and follows the link as usual — reading is not interrupted, the disc keeps up. The other
+way round, a neighbour clicked on the card scrolls the article to the sentence where that
+link is made and flashes it. The marks are recomputed on every draw, since they are the
+intersection of the two: redraw around Physics and *Belgium* has 34 left.
+
 **Saved views** are the same URLs, kept. ★ in the bar saves what is on screen under the
 disc's own heading (*Cheese → Black hole (3 hops)*), and turns off again on a view that is
 already saved; *Saved (n)* lists them, newest first, each a click back, × forgets one. In
