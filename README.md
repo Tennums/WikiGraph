@@ -26,6 +26,7 @@ thousand articles chosen for a reason:
 | **What links here** | the same, following in-links only | subject area |
 | **What it links to** | the same, following out-links only | subject area |
 | **Path between two** | the shortest chain of links, pinned to the hub, each step with a slice of its neighbourhood | subject area |
+| **Common ground of two** | what both link to, and who links to both — the overlap rather than the chain; both seeds pinned | subject area |
 | **Category tree** | everything under a category, N levels deep | direct subcategories |
 | **Most linked-to** | the top articles by in-degree | subject area |
 
@@ -107,6 +108,12 @@ lands in the former. Before this, *Math stubs* was the largest wedge of Mathemat
 Degree *on the disc* is recomputed over each selection rather than taken globally: the
 disc rings articles by the links it can actually see, and a global degree would pull
 articles to the centre for links to nodes that are not on screen.
+
+*Common ground* answers a different question from the path: not how to get from one
+article to the other, but what they share. Four sorted neighbour lists, two merges; each
+result is labelled *both link to it*, *links to both*, or *linked both ways with both*.
+With *mutual links only* it tightens to articles mutually linked with both seeds —
+*Belgium × Japan* then gives the countries each treats as a peer.
 
 The path search is bidirectional — forward along out-links, backward along in-links,
 always growing the smaller side. Wikipedia's link graph has a diameter of a few hops but

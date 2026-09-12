@@ -202,6 +202,36 @@ const server = createServer(async (req, res) => {
         return json(res, 200, data);
       }
 
+      /* The overlap of two articles: what both link to, and who links to both. The two
+         seeds are pinned to the hub; everything else is their common ground. */
+      case "/api/view/common": {
+        const a = graph.lookup(q.get("from") ?? "");
+        const b = graph.lookup(q.get("to") ?? "");
+        if (a < 0) return json(res, 404, { error: `no article "${q.get("from")}"` });
+        if (b < 0) return json(res, 404, { error: `no article "${q.get("to")}"` });
+        if (a === b) return json(res, 400, { error: "pick two different articles" });
+        const mutual = wantMutual(q);
+        const sel = graph.common(a, b, {
+          limit: budget(q.get("limit"), 2500) - 2, hide: hidden(q), minLen: minLen(q), mutual,
+        });
+        const names = [graph.titleOf(a), graph.titleOf(b)].map((t) => t.replace(/_/g, " "));
+        if (!sel.ids.length) {
+          return json(res, 404, {
+            error: `${names[0]} and ${names[1]} have no articles in common` +
+                   (mutual ? " by mutual links" : "") +
+                   (sel.cited + sel.citing ? " that pass the current filters" : ""),
+          });
+        }
+        const data = graph.toVaultData([a, b, ...sel.ids], {
+          mutual,
+          title: `${names[0]} × ${names[1]}`,
+          typeOf: (id) => id === a || id === b ? "the seed" : sel.role.get(id),
+        });
+        data.path = [String(a), String(b)];
+        data.common = { cited: sel.cited, citing: sel.citing, shown: sel.ids.length };
+        return json(res, 200, data);
+      }
+
       case "/api/view/category": {
         const pid = graph.findCategory(q.get("title") ?? "");
         if (pid < 0) return json(res, 404, { error: `no category "${q.get("title")}"` });

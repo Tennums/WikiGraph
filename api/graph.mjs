@@ -355,6 +355,34 @@ export class WikiGraph {
     return null;
   }
 
+  /**
+   * What two articles have in common: the articles both of them link to, and the
+   * articles that link to both.
+   *
+   * Not the chain between them (that is `path`) but their overlap -- "what connects
+   * these two subjects". Four sorted lists, two merges. With `mutual` the question
+   * tightens to articles that are mutually linked with both. Ranked by in-degree,
+   * and each survivor is labelled with which side it is on so the card can say.
+   */
+  common(a, b, { limit = 3000, hide = [], minLen = 0, mutual = false } = {}) {
+    const ok = this.allow(hide, minLen);
+    let cited, citing;
+    if (mutual) {
+      cited = citing = intersectSorted(this.mutual(a), this.mutual(b));
+    } else {
+      cited = intersectSorted(this.out.neighbours(a), this.out.neighbours(b));
+      citing = intersectSorted(this.in.neighbours(a), this.in.neighbours(b));
+    }
+    const role = new Map();
+    for (const v of cited) if (v !== a && v !== b && ok(v)) role.set(v, "both link to it");
+    for (const v of citing) {
+      if (v === a || v === b || !ok(v)) continue;
+      role.set(v, role.has(v) ? "linked both ways with both" : "links to both");
+    }
+    const ids = [...role.keys()].sort((x, y) => this.indeg[y] - this.indeg[x]).slice(0, limit);
+    return { ids, role, cited: cited.length, citing: citing.length };
+  }
+
   /** Every article filed under `catPid`, walking `depth` levels of subcategories. */
   categorySubtree(catPid, { depth = 3, limit = 3000, hide = [], minLen = 0 } = {}) {
     const ok = this.allow(hide, minLen);

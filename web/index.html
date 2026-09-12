@@ -49,6 +49,7 @@
     <option value="in">What links here</option>
     <option value="out">What it links to</option>
     <option value="path">Path between two</option>
+    <option value="common">Common ground of two</option>
     <option value="category">Category tree</option>
     <option value="top">Most linked-to</option>
   </select>
@@ -143,7 +144,7 @@ function writeHash(push) {
   const view = $("view").value;
   for (const f of FIELDS) {
     // Only what the view actually uses, so the link says what it shows.
-    if (f === "q2" && view !== "path") continue;
+    if (f === "q2" && !["path", "common"].includes(view)) continue;
     if (f === "hops" && !["neighborhood", "in", "out"].includes(view)) continue;
     if (f === "q" && view === "top") continue;
     h.set(f, $(f).value.trim());
@@ -168,6 +169,7 @@ async function draw({ push = true } = {}) {
     view === "top" ? `api/view/top?limit=${limit}`
     : view === "category" ? `api/view/category?title=${t}&limit=${limit}&depth=3`
     : view === "path" ? `api/view/path?from=${t}&to=${encodeURIComponent($("q2").value.trim())}&limit=${limit}`
+    : view === "common" ? `api/view/common?from=${t}&to=${encodeURIComponent($("q2").value.trim())}&limit=${limit}`
     : `api/view/neighborhood?title=${t}&limit=${limit}&hops=${$("hops").value}` +
       `&direction=${view === "neighborhood" ? "both" : view}`) + hide;
 
@@ -219,6 +221,7 @@ async function draw({ push = true } = {}) {
   const drawn = Math.round(performance.now() - t1);
 
   status((data.pathTitles ? data.pathTitles.join(" → ") + " · " : "") +
+         (data.common ? `both link to ${data.common.cited}, ${data.common.citing} link to both · ` : "") +
          `${data.nodes.length.toLocaleString()} articles · ` +
          `${data.edges.length.toLocaleString()} links · ${queried}ms query · ${drawn}ms draw`);
 }
@@ -313,7 +316,9 @@ const syncControls = () => {
   $("q").disabled = view === "top";
   const nbhd = ["neighborhood", "in", "out"].includes(view);
   $("hops").hidden = $("hopsLabel").hidden = !nbhd;
-  $("q2").hidden = $("q2Label").hidden = view !== "path";
+  const two = ["path", "common"].includes(view);
+  $("q2").hidden = $("q2Label").hidden = !two;
+  $("q2Label").textContent = view === "common" ? "×" : "→";
   $("q").placeholder = view === "category" ? "Physics (category name)" : "Physics";
 };
 $("view").addEventListener("change", syncControls);
