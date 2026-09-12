@@ -102,6 +102,16 @@ const within = (q) => {
   return { mask: graph.categoryMask(pid, depth), name: name.replace(/_/g, " ") };
 };
 
+/**
+ * Node keys on the disc are positions in `nodes`, not article ids -- the page keys its
+ * store by index, which is also what edges' s/t refer to. Anything handed to the page
+ * that names nodes (pins) has to be translated.
+ */
+const positionsOf = (ids, articleIds) => {
+  const pos = new Map(ids.map((id, i) => [id, i]));
+  return articleIds.map((a) => pos.get(a)).filter((i) => i !== undefined).map(String);
+};
+
 /** `rank=pagerank` -> rank frontiers, search and the top list by PageRank instead of in-degree. */
 const rankBy = (q) => (q.get("rank") === "pagerank" && graph.rank ? "pagerank" : "indegree");
 
@@ -204,6 +214,9 @@ const server = createServer(async (req, res) => {
                     : direction === "mutual" ? `${name} — mutual links` : name)
                     + (w.name ? ` · within ${w.name}` : "");
         const data = graph.toVaultData(sel.ids, { title, depth: sel.depth, mutual, group: groupBy(q) });
+        // The article the disc is drawn around sits in the hub, as a path's steps do:
+        // the one dot the view is about should never have to be found on the rim.
+        data.pinned = positionsOf(sel.ids, [seed]);
         if (w.mask) data.within = { name: w.name, articles: w.mask.count, categories: w.mask.categories };
         return json(res, 200, data);
       }
@@ -243,6 +256,7 @@ const server = createServer(async (req, res) => {
           typeOf: (id) => path.includes(id) ? `step ${path.indexOf(id)} of ${path.length - 1}` : "along the path",
         });
         data.path = path.map(String);
+        data.pinned = positionsOf(ids, path);
         data.pathTitles = names;
         data.pathMs = Date.now() - t0;
         return json(res, 200, data);
@@ -277,6 +291,7 @@ const server = createServer(async (req, res) => {
           typeOf: (id) => id === a || id === b ? "the seed" : sel.role.get(id),
         });
         data.path = [String(a), String(b)];
+        data.pinned = positionsOf([a, b, ...sel.ids], [a, b]);
         data.common = { cited: sel.cited, citing: sel.citing, shown: sel.ids.length };
         return json(res, 200, data);
       }

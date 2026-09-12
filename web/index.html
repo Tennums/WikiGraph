@@ -267,9 +267,9 @@ async function draw({ push = true, fromGame = false } = {}) {
     // configured) makes the page omit the button rather than draw a dead one.
     articleHref: (label) =>
       info.reader ? `${info.reader}/${encodeURIComponent(label.replace(/ /g, "_"))}` : "",
-    // A path view pins its chain to the hub -- upstream's own "pin to hub" feature,
-    // which is exactly the right place for the one thing the view is about.
-    pinned: data.path ?? [],
+    // What the view is about sits in the hub -- upstream's own "pin to hub" feature:
+    // the seed of a neighbourhood, the chain of a path, both seeds of common ground.
+    pinned: data.pinned ?? [],
     // "Draw around this" on the card: a new neighbourhood with that article as the
     // seed. This is what turns a picture into a walk -- each click is a page in the
     // history, so the back button retraces it.
