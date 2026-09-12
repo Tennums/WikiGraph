@@ -118,6 +118,16 @@ way round, a neighbour clicked on the card scrolls the article to the sentence w
 link is made and flashes it. The marks are recomputed on every draw, since they are the
 intersection of the two: redraw around Physics and *Belgium* has 34 left.
 
+**A reading list.** *To read* and *read* on the card and in the reader bar (one button
+there, cycling). Marked articles wear a halo on the disc — gold to read, green read — put on
+the nodes by the page before the disc is built, and a tag on the card; the *Reading* panel
+lists both groups, each a click into the reader. A *reading* filter beside it applies to
+every view — *hide read*, *only marked*, *only to read* — on the client, so the server never
+hears of it; the seed and a path's steps stay whatever the filter says. *Copy list as
+Markdown* puts `- [x] [Brussels](kiwix url) — first sentence` on the clipboard (first
+sentences fetched, a few dozen at most), *Copy view as Markdown* the disc's articles with
+topic and link count, headed by the view's URL — for notes.
+
 **Saved views** are the same URLs, kept. ★ in the bar saves what is on screen under the
 disc's own heading (*Cheese → Black hole (3 hops)*), and turns off again on a view that is
 already saved; *Saved (n)* lists them, newest first, each a click back, × forgets one. In

@@ -63,6 +63,29 @@
   #savedFoot { display: flex; gap: 6px; padding: 6px; border-top: 1px solid #2c313a; }
   #savedFoot button { padding: 2px 8px; }
 
+  /* The reading list: the same panel, two groups. */
+  #readingPanel { position: fixed; z-index: 30; min-width: 300px; max-width: 480px; max-height: 60vh;
+                  display: flex; flex-direction: column; background: #1b1e24; color: #e8e8ea;
+                  border: 1px solid #333944; border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+  #readingPanel[hidden] { display: none; }
+  #readingGroups { overflow-y: auto; padding: 4px 0; }
+  #readingGroups h4 { margin: 6px 12px 2px; font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
+                      color: #8b93a1; font-weight: 600; }
+  #readingGroups h4 i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  #readingGroups ul { margin: 0; padding: 0; list-style: none; }
+  #readingGroups li { display: flex; align-items: center; gap: 4px; padding: 0 6px; }
+  #readingGroups li:hover { background: #23272f; }
+  #readingGroups a { flex: 1; min-width: 0; padding: 4px 4px; color: #e8e8ea; text-decoration: none;
+                     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #readingGroups button { padding: 0 6px; color: #8b93a1; background: transparent; border-color: transparent; }
+  #readingGroups button:hover { color: #e8e8ea; border-color: #333944; }
+  #readingGroups button.x:hover { color: #ff8b8b; }
+  #readingEmpty { padding: 10px 12px; color: #8b93a1; }
+  #readingFoot { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px; border-top: 1px solid #2c313a; }
+  #readingFoot button { padding: 2px 8px; }
+  #readerMark[aria-pressed="true"] { color: #ffd166; }
+  #readerMark.read[aria-pressed="true"] { color: #b6f09c; }
+
   #trail { display: flex; gap: 6px; align-items: center; padding: 4px 12px;
            background: #181b20; border-bottom: 1px solid #2c313a; color: #8b93a1;
            font-size: 12px; overflow: hidden; white-space: nowrap; }
@@ -167,6 +190,13 @@
   <button id="play" title="Six degrees: two random articles; get from one to the other by clicking 'Draw around this', then see how your route compares with the shortest.">&#127919; Six degrees</button>
   <button id="star" title="Save this view in this browser" aria-label="Save this view">&#9734;</button>
   <button id="savedBtn" title="Saved views">Saved</button>
+  <button id="readingBtn" title="Your reading list: articles marked to read or read">Reading</button>
+  <select id="reading" title="Reading state as a filter on every view. Marked articles wear a halo: gold to read, green read.">
+    <option value="all" selected>all articles</option>
+    <option value="unread">hide read</option>
+    <option value="marked">only marked</option>
+    <option value="toread">only to read</option>
+  </select>
 
   <label for="group" title="Topic: how the wiki files these articles. Cluster: how they actually hang together, by modularity on the links drawn — each wedge named after its three most linked-to members. Hop distance: the shells of the neighbourhood — the seed, what it links to, what those link to.">Wedges</label>
   <select id="group">
@@ -227,6 +257,15 @@
   </div>
 </div>
 
+<div id="readingPanel" hidden>
+  <div id="readingGroups"></div>
+  <div id="readingEmpty" hidden>Nothing marked yet. The card and the reader have <i>to read</i> and <i>read</i>.</div>
+  <div id="readingFoot">
+    <button id="readingCopy" title="The reading list as Markdown, on the clipboard">Copy list as Markdown</button>
+    <button id="viewCopy" title="The articles on the disc as a Markdown list, on the clipboard">Copy view as Markdown</button>
+  </div>
+</div>
+
 <div id="trail" hidden>
   <span id="trailItems"></span>
   <button id="trailClear" title="Forget this walk">&times;</button>
@@ -255,6 +294,7 @@
       <button id="readerBack" title="Back, within the article panel">&#8592;</button>
       <span id="readerTitle"></span>
       <span id="readerOnDisc" title="Links in this article to articles on the disc are underlined in gold; the mouse over one lights its dot, a click selects it"></span>
+      <button id="readerMark" title="Mark the article being read: to read, then read, then unmarked">&#9734; to read</button>
       <button id="readerRecenter" title="Redraw the disc around the article being read">&#8982; Draw around this</button>
       <a id="readerExternal" target="_blank" rel="noopener" title="Open in a new tab">&#8599;</a>
       <button id="readerClose" title="Close the article panel">&times;</button>
@@ -290,7 +330,7 @@ const markup = await (await fetch("vendor/page.html")).text();
  * button. The hash rather than the query string: it never reaches the server, so a
  * shared link is just a link and the API stays cacheable by path.
  */
-const FIELDS = ["view", "q", "q2", "limit", "hops", "minlen", "within", "group", "rank", "size"];
+const FIELDS = ["view", "q", "q2", "limit", "hops", "minlen", "within", "group", "rank", "size", "reading"];
 const hideBoxes = () => [...document.querySelectorAll("#hide input")];
 const hideValue = () => hideBoxes().filter((b) => b.checked).map((b) => b.value).join(",");
 
@@ -318,6 +358,7 @@ function readHash() {
   if (!h.has("group")) $("group").value = "topic";
   if (!h.has("rank")) $("rank").value = "indegree";
   if (!h.has("size")) $("size").value = "degree";
+  if (!h.has("reading")) $("reading").value = "all";
   return true;
 }
 
@@ -332,6 +373,7 @@ function writeHash(push) {
     if (f === "group" && $(f).value === "topic") continue;
     if (f === "rank" && $(f).value === "indegree") continue;
     if (f === "size" && $(f).value === "degree") continue;
+    if (f === "reading" && $(f).value === "all") continue;
     // The category view is already a category; "within" would only repeat it.
     if (f === "within" && (view === "category" || !$(f).value.trim())) continue;
     h.set(f, $(f).value.trim());
@@ -404,6 +446,10 @@ async function draw({ push = true, fromGame = false } = {}) {
   // are deliberately derived once at load.
   $("mount").innerHTML = markup;
 
+  // The reading state is the browser's, not the server's: it goes onto the nodes here
+  // (a halo, and a tag on the card), and the reading filter is applied here too.
+  data = reading.apply(data, $("reading").value);
+
   const t1 = performance.now();
   disc.mounted = mountVaultGraph($("mount").querySelector("#vg-app"), data, {
     Graph: window.VaultGraphEngine.GraphStore,
@@ -436,6 +482,8 @@ async function draw({ push = true, fromGame = false } = {}) {
     articlePreview: info.reader ? articlePreview : undefined,
     // Rank and categories under it, from the API; the chips draw or filter.
     articleFacts,
+    // To read / read on the card.
+    articleActions: (label, el) => reading.buttons(label, el),
     // "why?" beside a neighbour: the sentence that makes the link, from Kiwix.
     linkWhy: info.reader ? (from, to, el) => {
       el.textContent = "…";
@@ -446,6 +494,7 @@ async function draw({ push = true, fromGame = false } = {}) {
     onNeighbour: (from, to) => reader.scrollToLink(from, to),
   });
   disc.labels = new Set(data.nodes.map((n) => n.label));
+  disc.data = data;
   reader.markLinks();
   const drawn = Math.round(performance.now() - t1);
   // The legend heading is static markup; say what the wedges are this time.
@@ -470,7 +519,8 @@ async function draw({ push = true, fromGame = false } = {}) {
   pathWhy(data.pathTitles);
   saved.drawn(data.vault);
 
-  status((data.textHits !== undefined ? `${data.textHits.toLocaleString()} articles mention it · ` +
+  status((data.readingHidden ? `${data.readingHidden} hidden by reading state · ` : "") +
+         (data.textHits !== undefined ? `${data.textHits.toLocaleString()} articles mention it · ` +
            (data.set.filtered ? `${data.set.filtered} filtered · ` : "") : "") +
          (data.within ? `${data.within.articles.toLocaleString()} articles under ${data.within.name} · ` : "") +
          (data.pathTitles ? data.pathTitles.join(" → ") + " · " : "") +
@@ -663,6 +713,7 @@ reader.frame.addEventListener("load", () => {
   if (title) $("readerTitle").textContent = title;
   $("readerExternal").href = url;
   reader.markLinks();
+  reading.syncReaderButton();
   // Links off the wiki (mwoffliner keeps a "view on wikipedia.org" link, and citations)
   // leave the panel for a tab rather than steering the frame onto the internet.
   try {
@@ -1301,6 +1352,191 @@ if (!info.textSearch) {
 if (info.minLenDefault !== undefined && !location.hash.includes("minlen=")) {
   $("minlen").value = String(info.minLenDefault);
 }
+
+/**
+ * The reading list. Articles marked "to read" or "read", in localStorage like the
+ * saved views. It shows in three places: on the disc as a halo (gold to read, green
+ * read -- the page draws it from a `mark` on the node), on the card as a tag and a
+ * pair of buttons, and in a panel that lists both groups. The reading filter is applied
+ * here, to the view data, before the disc is built: the server never hears of it.
+ */
+const reading = {
+  KEY: "wikigraph.reading",
+  list() {
+    try { const v = JSON.parse(localStorage.getItem(this.KEY) ?? "[]"); return Array.isArray(v) ? v : []; }
+    catch { return []; }
+  },
+  store(items) {
+    try { localStorage.setItem(this.KEY, JSON.stringify(items)); }
+    catch (e) { status(`could not save: ${e.message}`, true); }
+    this.render();
+  },
+  get(title) { return this.list().find((s) => s.title === title)?.state ?? null; },
+  /** state: "toread" | "read" | null (unmark). Newest first, one entry per title. */
+  set(title, state) {
+    const rest = this.list().filter((s) => s.title !== title);
+    this.store(state ? [{ title, state, at: new Date().toISOString() }, ...rest] : rest);
+    // The dot on screen follows without a redraw: the halo is read from the node.
+    const api = disc.api(), id = api?.idOf(title);
+    if (id) { api.graph.setNodeAttribute(id, "mark", state); api.renderer.refresh(); }
+    this.syncReaderButton();
+  },
+  /** Marks onto the nodes, and the filter: returns the data to mount. */
+  apply(data, filter) {
+    const items = this.list();
+    if (!items.length) return data;
+    const state = new Map(items.map((s) => [s.title, s.state]));
+    for (const n of data.nodes) {
+      const st = state.get(n.label);
+      if (st) { n.mark = st; n.tags = [...(n.tags ?? []), st === "read" ? "read" : "to read"]; }
+    }
+    if (filter === "all") return data;
+    const keep = filter === "unread" ? (n) => n.mark !== "read"
+               : filter === "marked" ? (n) => !!n.mark
+               : (n) => n.mark === "toread";
+    // Pinned articles (the seed, a path's steps) are what the view is about; they stay.
+    const pinned = new Set((data.pinned ?? []).map(Number));
+    const map = new Map();
+    const nodes = [];
+    data.nodes.forEach((n, i) => { if (keep(n) || pinned.has(i)) { map.set(i, nodes.length); nodes.push(n); } });
+    if (nodes.length === data.nodes.length) return data;
+    const edges = data.edges.filter((e) => map.has(e.s) && map.has(e.t))
+      .map((e) => ({ ...e, s: map.get(e.s), t: map.get(e.t) }));
+    return {
+      ...data, nodes, edges,
+      pinned: (data.pinned ?? []).map((p) => map.get(Number(p))).filter((x) => x !== undefined).map(String),
+      stats: { ...data.stats, files: nodes.length, nodes: nodes.length, edges: edges.length },
+      readingHidden: data.nodes.length - nodes.length,
+    };
+  },
+  /** The card's two buttons: each toggles its state; the other one is then off. */
+  buttons(label, el) {
+    const st = this.get(label);
+    el.replaceChildren();
+    for (const [state, text, tip] of [["toread", "\u2606 to read", "Keep for later"], ["read", "\u2713 read", "Done with it"]]) {
+      const b = document.createElement("button");
+      b.className = "btn"; b.textContent = text; b.title = tip;
+      b.setAttribute("aria-pressed", String(st === state));
+      b.addEventListener("click", () => { this.set(label, st === state ? null : state); this.buttons(label, el); });
+      el.append(b);
+    }
+  },
+  /** The reader bar's one button cycles: unmarked -> to read -> read -> unmarked. */
+  syncReaderButton() {
+    const b = $("readerMark");
+    const t = reader.open ? reader.current() : "";
+    b.hidden = !t;
+    if (!t) return;
+    const st = this.get(t);
+    b.textContent = st === "read" ? "\u2713 read" : st === "toread" ? "\u2605 to read" : "\u2606 to read";
+    b.classList.toggle("read", st === "read");
+    b.setAttribute("aria-pressed", String(!!st));
+  },
+  render() {
+    const items = this.list();
+    $("readingBtn").textContent = items.length ? `Reading (${items.length})` : "Reading";
+    $("readingEmpty").hidden = items.length > 0;
+    $("readingCopy").disabled = !items.length;
+    const groups = $("readingGroups");
+    groups.replaceChildren();
+    for (const [state, name, colour] of [["toread", "To read", "#ffd166"], ["read", "Read", "#6f8f7a"]]) {
+      const rows = items.filter((s) => s.state === state);
+      if (!rows.length) continue;
+      const h = document.createElement("h4");
+      const dot = document.createElement("i"); dot.style.background = colour;
+      h.append(dot, `${name} (${rows.length})`);
+      const ul = document.createElement("ul");
+      for (const s of rows) {
+        const li = document.createElement("li");
+        const a = document.createElement("a");
+        a.href = "#"; a.textContent = s.title; a.title = `Open ${s.title}`;
+        a.addEventListener("click", (e) => { e.preventDefault(); this.open(s.title); });
+        const flip = document.createElement("button");
+        flip.textContent = state === "toread" ? "\u2713" : "\u21ba";
+        flip.title = state === "toread" ? "Mark as read" : "Back to the reading list";
+        flip.addEventListener("click", () => this.set(s.title, state === "toread" ? "read" : "toread"));
+        const x = document.createElement("button");
+        x.className = "x"; x.innerHTML = "&times;"; x.title = "Unmark";
+        x.addEventListener("click", () => this.set(s.title, null));
+        li.append(a, flip, x);
+        ul.append(li);
+      }
+      groups.append(h, ul);
+    }
+  },
+  // Open: the reader when there is one, else the disc around it.
+  open(title) {
+    this.hide();
+    if (info.reader) reader.show(`${info.reader}/${encodeURIComponent(title.replace(/ /g, "_"))}`, title);
+    else { $("view").value = "neighborhood"; $("q").value = title; syncControls(); draw(); }
+  },
+  show() {
+    this.render();
+    const p = $("readingPanel"), r = $("readingBtn").getBoundingClientRect();
+    p.hidden = false;
+    p.style.top = `${r.bottom + 4}px`;
+    p.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - p.offsetWidth - 8))}px`;
+  },
+  hide() { $("readingPanel").hidden = true; },
+  /**
+   * Markdown for notes: a list item per article with its Kiwix link. The reading list
+   * adds each article's first sentence (fetched, cached; a few dozen at most); a view
+   * is too many to fetch, so it gets the topic and the link count instead.
+   */
+  link(title) {
+    return info.reader ? `[${title}](${info.reader}/${encodeURIComponent(title.replace(/ /g, "_"))})` : `**${title}**`;
+  },
+  async copyList() {
+    const items = this.list();
+    const lines = [];
+    for (const [state, name] of [["toread", "To read"], ["read", "Read"]]) {
+      const rows = items.filter((s) => s.state === state);
+      if (!rows.length) continue;
+      lines.push(`## ${name}`, "");
+      for (const s of rows.slice(0, 60)) {
+        let first = "";
+        if (info.reader) {
+          const doc = await fetchDoc(s.title);
+          const para = doc ? firstParagraph(doc) : "";
+          first = para ? " — " + para.split(/(?<=[.!?])\s/)[0] : "";
+        }
+        lines.push(`- ${state === "read" ? "[x]" : "[ ]"} ${this.link(s.title)}${first}`);
+      }
+      lines.push("");
+    }
+    await this.clip(lines.join("\n"), `${items.length} articles`);
+  },
+  async copyView() {
+    const d = disc.mounted?.api ? disc.data : null;
+    if (!d) { status("nothing drawn yet", true); return; }
+    const lines = [`# ${d.vault}`, "", `${d.nodes.length} articles · ${location.href}`, ""];
+    const shown = d.nodes.map((n, i) => [n, i]).filter(([, i]) => disc.api().visible?.(String(i)) ?? true);
+    shown.sort((a, b) => b[0].deg - a[0].deg);
+    for (const [n] of shown) {
+      lines.push(`- ${this.link(n.label)} — ${n.folder}${n.deg ? ` · ${n.deg} links` : ""}${n.mark ? ` · ${n.mark === "read" ? "read" : "to read"}` : ""}`);
+    }
+    await this.clip(lines.join("\n"), `${shown.length} articles`);
+  },
+  async clip(text, what) {
+    try { await navigator.clipboard.writeText(text); status(`copied ${what} as Markdown`); }
+    catch (e) { status(`clipboard refused: ${e.message}`, true); }
+  },
+};
+$("readingBtn").addEventListener("click", () => ($("readingPanel").hidden ? reading.show() : reading.hide()));
+$("readingCopy").addEventListener("click", () => reading.copyList());
+$("viewCopy").addEventListener("click", () => reading.copyView());
+$("reading").addEventListener("change", () => draw());
+$("readerMark").addEventListener("click", () => {
+  const t = reader.current();
+  if (!t) return;
+  const st = reading.get(t);
+  reading.set(t, st === null ? "toread" : st === "toread" ? "read" : null);
+});
+document.addEventListener("click", (e) => {
+  if (!$("readingPanel").hidden && !$("readingPanel").contains(e.target) && e.target !== $("readingBtn")) reading.hide();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") reading.hide(); });
+reading.render();
 
 /**
  * Saved views. Every view is a URL; this keeps a list of them in the browser. The star

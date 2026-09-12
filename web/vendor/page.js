@@ -551,7 +551,9 @@ function mountVaultGraph(root, data, deps) {
       words: n.words || 0, ghost: !!n.ghost,
       // wikigraph: an optional importance 0..1 that sets the radius instead of the
       // degree. The degree still places the dot; only how big it is drawn changes.
-      imp: typeof n.size === "number" ? Math.max(0, Math.min(1, n.size)) : null
+      imp: typeof n.size === "number" ? Math.max(0, Math.min(1, n.size)) : null,
+      // wikigraph: the host's reading state ("toread" | "read"), drawn as a halo.
+      mark: n.mark || null
     });
   });
   // github#43
@@ -4359,10 +4361,13 @@ function mountVaultGraph(root, data, deps) {
     ctx.fillText(data.label, data.x + data.size + 5, data.y + n / 3);
   }
 
+  var MARK_TOREAD = "#ffd166", MARK_READ = "#6f8f7a";
   /** @param {string} id @param {NodeAttrs} a @returns {NodeDisplayData & { haloColor?: string }} */
   function nodeStyle(id, a) {
         var r = /** @type {NodeDisplayData & { haloColor?: string }} */ (Object.assign({}, a));
         r.color = nodeColor(id);
+        // wikigraph: a marked article wears a halo -- gold to read, grey-green read.
+        if (a.mark) { r.type = "halo"; r.haloColor = a.mark === "read" ? MARK_READ : MARK_TOREAD; r.zIndex = 1; }
         var hv = hl[id] || 0;
         if (state.markDay && graph.getNodeAttribute(id, "created") === state.markDay) {
           r.color = mixHex(r.color, THEME.today, hv);
@@ -5052,6 +5057,8 @@ function mountVaultGraph(root, data, deps) {
           ' Pin to hub</button>' +
         (canRecenter ? '<button class="btn recenter" title="Redraw the disc with this article at the centre">' +
           '&#8982; Draw around this</button>' : "") +
+        // wikigraph: room for the host's own buttons (reading state)
+        (typeof deps.articleActions === "function" && !a.ghost ? '<span class="host-actions"></span>' : "") +
       '</div>';
 
     // wikigraph: a "why?" beside each neighbour when the host can explain a link --
@@ -5094,6 +5101,8 @@ function mountVaultGraph(root, data, deps) {
     if (pv) deps.articlePreview(a.label, pv);
     var fc = d.querySelector(".facts");
     if (fc) deps.articleFacts(a.label, fc);
+    var ha = d.querySelector(".host-actions");
+    if (ha) deps.articleActions(a.label, ha);
     Array.prototype.forEach.call(d.querySelectorAll("[data-go]"), /** @param {HTMLElement} b */ function (b) {
       b.onclick = function () {
         var to = b.getAttribute("data-go");
