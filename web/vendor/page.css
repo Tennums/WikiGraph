@@ -589,6 +589,10 @@
     pointer-events: none;
   }
   .vault-graph #vg-detail .preview.short::after { display: none; }
+  .vault-graph #vg-detail .preview img {
+    float: right; width: 84px; max-height: 110px; object-fit: cover;
+    margin: 0 0 4px 8px; border-radius: 4px; border: 1px solid var(--border);
+  }
   .vault-graph #vg-detail .preview.pending { color: var(--text-3); font-style: italic; }
   .vault-graph #vg-detail .actions {
     display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px;

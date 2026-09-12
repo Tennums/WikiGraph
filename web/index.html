@@ -60,7 +60,7 @@
   /* The article beside the disc. Width is the reader's, in a CSS variable the divider
      drags; the disc takes the rest and re-fits itself (upstream watches its own box). */
   #reader { width: var(--reader-w, 44%); min-width: 320px; max-width: 75%; z-index: 10;
-            display: flex; flex-direction: column; background: #fff; border-left: 1px solid #2c313a; }
+            display: flex; flex-direction: column; background: #14161a; border-left: 1px solid #2c313a; }
   #reader[hidden], #divider[hidden] { display: none; }
   #divider { width: 6px; cursor: col-resize; background: #1b1e24; flex: none; }
   #divider:hover, #divider.dragging { background: #3987e5; }
@@ -71,7 +71,12 @@
   #readerBar button, #readerBar a { padding: 2px 8px; font: inherit; color: #e8e8ea;
                                     background: #23272f; border: 1px solid #333944;
                                     border-radius: 5px; text-decoration: none; cursor: pointer; }
-  #readerFrame { flex: 1; border: 0; width: 100%; background: #fff; }
+  /* The article arrives styled white by mwoffliner's Vector skin; a dark stylesheet is
+     injected on load (same origin). Until then the frame is transparent, so the page
+     never flashes white between the load and the injection. */
+  #readerFrame { flex: 1; border: 0; width: 100%; background: #14161a; opacity: 0;
+                 transition: opacity .15s; color-scheme: dark; }
+  #readerFrame.themed { opacity: 1; }
   /* Too narrow for two columns: the reader floats over the disc instead of crushing it. */
   @media (max-width: 900px) {
     #reader { position: absolute; right: 0; top: 0; bottom: 0; width: 88%; max-width: none;
@@ -371,6 +376,7 @@ const reader = {
   // is then the disc's history only; the panel's ← is the panel's only.
   stack: [],
   go(url) {
+    this.frame.classList.remove("themed");   // the next document arrives white too
     const win = this.frame.contentWindow;
     if (win && win.location.href !== "about:blank") win.location.replace(url);
     else this.frame.src = url;
@@ -401,8 +407,80 @@ const reader = {
   current() { return this.titleOf(this.frame.contentWindow?.location?.href ?? this.frame.src); },
 };
 
+/**
+ * The article in the page's own colours. mwoffliner ships the Vector skin, white on
+ * white; this overrides its surfaces and text with the palette the rest of Wikigraph
+ * uses, targeting the skin's classes rather than fighting its selectors one by one.
+ * Images are left alone.
+ */
+const READER_THEME = `
+  :root { color-scheme: dark; }
+  html, body, .mw-page-container, .mw-page-container-inner, .mw-body, .mw-body-content,
+  .vector-body, .mw-parser-output, .mw-content-container {
+    background: #14161a !important; color: #e8e8ea !important;
+  }
+  body { font-size: 15px; line-height: 1.55; }
+  .mw-body { padding: 8px 18px 40px; margin: 0; border: 0; }
+  h1, h2, h3, h4, h5, .mw-headline, #firstHeading, .firstHeading {
+    color: #f2f2f4 !important; border-color: #2c313a !important;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  a, a:visited { color: #9fd0ff !important; }
+  a:hover { color: #c9e4ff !important; }
+  a.new, a.new:visited { color: #ff8b8b !important; }
+  a.external { color: #7fc8a9 !important; }
+  .infobox, table.wikitable, .navbox, .toccolours, .sidebar, .box-Multiple_issues, .ambox,
+  .mbox, .tmbox, table.metadata, .mw-collapsible, .catlinks, .mw-references-wrap, .refbegin {
+    background: #1b1e24 !important; color: #e8e8ea !important; border-color: #2c313a !important;
+  }
+  .infobox th, table.wikitable th, .navbox th, .infobox-header, .infobox-above, .sidebar-title,
+  .infobox caption, .navbox-title, .navbox-group {
+    background: #23272f !important; color: #e8e8ea !important;
+  }
+  .infobox td, .infobox th, table.wikitable td, table.wikitable th { border-color: #2c313a !important; }
+  .infobox-subheader, .infobox-below, .infobox-data, .infobox-label { color: #e8e8ea !important; }
+  tr, td, th { background-color: transparent !important; }
+  .infobox [style*="background"], .navbox [style*="background"] { background: #23272f !important; }
+  figure, .thumb, .thumbinner, .thumbcaption, figcaption, .gallerybox, .gallerytext {
+    background: #1b1e24 !important; color: #8b93a1 !important; border-color: #2c313a !important;
+  }
+  .hatnote, .dablink, .rellink, .mw-editsection, .noprint, .mw-empty-elt, .reference-text {
+    color: #8b93a1 !important;
+  }
+  .hatnote, .dablink { background: transparent !important; border-color: #2c313a !important; }
+  hr { border-color: #2c313a; }
+  code, pre, tt, .mw-highlight { background: #23272f !important; color: #e8e8ea !important;
+                                  border-color: #2c313a !important; }
+  blockquote { border-left: 3px solid #2c313a; color: #c4c9d2; }
+  sup.reference a { color: #9fd0ff !important; }
+  .zim-footer, #footer, .printfooter { color: #8b93a1 !important; border-color: #2c313a !important;
+                                       background: transparent !important; }
+  img.mw-file-element, .infobox img, .thumbimage { border-radius: 3px; }
+  /* Formulae are black-on-transparent SVGs; MediaWiki marks them .mw-invert for exactly
+     this case, and so are a few icons that would otherwise vanish on a dark ground. */
+  .mw-invert, .skin-invert, .mwe-math-fallback-image-inline, .mwe-math-fallback-image-display {
+    filter: invert(1) hue-rotate(180deg);
+  }
+  ::selection { background: #3987e5; color: #fff; }
+`;
+
+function themeFrame() {
+  try {
+    const doc = reader.frame.contentDocument;
+    if (!doc?.head) return;
+    if (!doc.getElementById("wg-theme")) {
+      const style = doc.createElement("style");
+      style.id = "wg-theme";
+      style.textContent = READER_THEME;
+      doc.head.appendChild(style);
+    }
+  } catch {}
+  reader.frame.classList.add("themed");
+}
+
 // Every navigation inside the frame -- a link click, back -- lands here.
 reader.frame.addEventListener("load", () => {
+  themeFrame();
   const url = reader.frame.contentWindow?.location?.href;
   if (!url) return;
   const title = reader.titleOf(url);
@@ -487,28 +565,61 @@ async function articlePreview(label, el) {
   el.classList.add("pending");
   el.textContent = "loading…";
 
-  let text = null;
+  let preview = null;
   try {
-    const res = await fetch(`${info.reader}/${encodeURIComponent(title)}`, { signal: ctl.signal });
-    if (res.ok) text = firstParagraph(await res.text());
+    const url = `${info.reader}/${encodeURIComponent(title)}`;
+    const res = await fetch(url, { signal: ctl.signal });
+    if (res.ok) {
+      const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+      const text = firstParagraph(doc);
+      preview = text ? { text, image: leadImage(doc, url) } : null;
+    }
   } catch (e) {
     if (e.name === "AbortError") return;   // superseded; the next card is drawing
   }
-  previewCache.set(title, text);
-  if (!ctl.signal.aborted) showPreview(el, text);
+  previewCache.set(title, preview);
+  if (!ctl.signal.aborted) showPreview(el, preview);
 }
 
-function showPreview(el, text) {
+function showPreview(el, preview) {
   el.classList.remove("pending");
-  if (!text) { el.hidden = true; el.textContent = ""; return; }
+  el.replaceChildren();
+  if (!preview) { el.hidden = true; return; }
   el.hidden = false;
-  el.textContent = text;
+  if (preview.image) {
+    const img = document.createElement("img");
+    img.src = preview.image;
+    img.alt = "";
+    img.loading = "lazy";
+    img.onerror = () => img.remove();   // a broken thumbnail is worse than none
+    el.append(img);
+  }
+  el.append(document.createTextNode(preview.text));
   // If it all fits, no fade: the fade is a promise of more.
   requestAnimationFrame(() => el.classList.toggle("short", el.scrollHeight <= el.clientHeight + 2));
 }
 
-function firstParagraph(html) {
-  const doc = new DOMParser().parseFromString(html, "text/html");
+/**
+ * The article's lead image: the first picture in the infobox or the first thumbnail,
+ * skipping the icons that share those places -- flags, coats of arms, the little
+ * "edit" and "listen" symbols. Only a maxi ZIM has images at all; on a nopic ZIM this
+ * finds nothing and the card is as before.
+ */
+function leadImage(doc, articleUrl) {
+  const root = doc.querySelector("#mw-content-text") ?? doc.body;
+  for (const img of root.querySelectorAll(".infobox img, .thumb img, figure img, .thumbimage")) {
+    const w = Number(img.getAttribute("width")) || 0, h = Number(img.getAttribute("height")) || 0;
+    const src = img.getAttribute("src") ?? "";
+    // Icons are small, and mwoffliner keeps the source dimensions on the tag.
+    if ((w && w < 60) || (h && h < 60)) continue;
+    if (/\.svg(\.|$)/i.test(src) && (w < 120 || h < 120)) continue;  // flags, seals, symbols
+    if (!src || /^data:/.test(src)) continue;
+    try { return new URL(src, articleUrl).href; } catch { continue; }
+  }
+  return null;
+}
+
+function firstParagraph(doc) {
   const root = doc.querySelector("#mw-content-text") ?? doc.body;
   for (const p of root.querySelectorAll("p")) {
     // Anything inside a table (infobox), a hatnote, a navbox, or a reference block is
