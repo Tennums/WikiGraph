@@ -118,6 +118,7 @@ export class WikiGraph {
     // measures how much the rest of the wiki refers to it.
     this.indeg = this.in.degrees();
     this._topOrder = null;
+    this._maskCache = new Map();
 
     // One byte per article: list, date page, disambiguation, template-linked
     // infrastructure, or a plain article. Selections skip whatever kinds the caller
@@ -170,13 +171,61 @@ export class WikiGraph {
    * minimum length. Kept as a closure over two typed arrays so the hot loops below
    * pay two indexes and two compares per candidate, not a Set lookup on a string.
    */
-  allow(hide = [], minLen = 0) {
+  allow(hide = [], minLen = 0, within = null) {
     const mask = new Uint8Array(KIND_NAMES.length);
     for (const name of hide) if (KIND[name] !== undefined) mask[KIND[name]] = 1;
     const kind = this.kind, len = this.len;
-    return minLen > 0
+    const base = minLen > 0
       ? (idx) => mask[kind[idx]] === 0 && len[idx] >= minLen
       : (idx) => mask[kind[idx]] === 0;
+    // `within` is a membership mask over all articles (see categoryMask); one more
+    // byte lookup per candidate.
+    return within ? (idx) => within[idx] === 1 && base(idx) : base;
+  }
+
+  /**
+   * Every article filed under `catPid` or its subcategories, `depth` levels down, as
+   * a one-byte-per-article mask -- the shape `allow()` already tests against, and
+   * cheaper than a Set once a category runs to hundreds of thousands of members.
+   *
+   * Organising categories are walked through here without distinction: for a filter
+   * "under Science" means everything under it, however it is filed.
+   *
+   * The last few masks are kept, since a typeahead or a redraw asks for the same
+   * category again and a walk over a big category is the expensive part of a request.
+   */
+  categoryMask(catPid, depth = 3) {
+    const key = `${catPid}:${depth}`;
+    const hit = this._maskCache.get(key);
+    if (hit) { this._maskCache.delete(key); this._maskCache.set(key, hit); return hit; }
+
+    const kids = this.db.prepare("SELECT child FROM cat_tree WHERE parent = ?");
+    const members = this.db.prepare("SELECT idx FROM node_cat WHERE cat = ?");
+    const seen = new Set([catPid]);
+    let level = [catPid];
+    for (let d = 0; d < depth && level.length; d++) {
+      const next = [];
+      for (const c of level) {
+        for (const r of kids.all(c)) {
+          const child = Number(r.child);
+          if (!seen.has(child)) { seen.add(child); next.push(child); }
+        }
+      }
+      level = next;
+    }
+    const mask = new Uint8Array(this.n);
+    let count = 0;
+    for (const c of seen) {
+      for (const r of members.all(c)) {
+        const i = Number(r.idx);
+        if (mask[i] === 0) { mask[i] = 1; count++; }
+      }
+    }
+    mask.count = count;
+    mask.categories = seen.size;
+    this._maskCache.set(key, mask);
+    if (this._maskCache.size > 8) this._maskCache.delete(this._maskCache.keys().next().value);
+    return mask;
   }
 
   /** Out-neighbours; kept under the old name because toVaultData draws edges from it. */
@@ -216,8 +265,8 @@ export class WikiGraph {
    * finds Albert Einstein and "einstein" finds it too -- case-insensitive, diacritics
    * folded. Without it: the old prefix LIKE, fetched wide and re-ranked here.
    */
-  search(q, limit = 20, hide = [], minLen = 0) {
-    const ok = this.allow(hide, minLen);
+  search(q, limit = 20, hide = [], minLen = 0, within = null) {
+    const ok = this.allow(hide, minLen, within);
     const text = String(q).trim();
     if (!text) return [];
 
@@ -275,8 +324,8 @@ export class WikiGraph {
    * `direction` is which links to follow: "out" (what this article cites), "in" (what
    * cites it -- "what links here"), "both", or "mutual" (only links that go both ways).
    */
-  neighborhood(seed, { hops = 2, limit = 3000, direction = "both", hide = [], minLen = 0 } = {}) {
-    const ok = this.allow(hide, minLen);
+  neighborhood(seed, { hops = 2, limit = 3000, direction = "both", hide = [], minLen = 0, within = null } = {}) {
+    const ok = this.allow(hide, minLen, within);
     const expand = (u) => {
       if (direction === "out") return [this.out.neighbours(u)];
       if (direction === "in") return [this.in.neighbours(u)];
@@ -312,12 +361,12 @@ export class WikiGraph {
    * target would read most of the graph; meeting in the middle keeps both frontiers
    * to a few thousand articles. Returns the path as node ids, or null.
    */
-  path(a, b, { maxDepth = 8, maxVisited = 4_000_000, hide = [], minLen = 0, mutual = false } = {}) {
+  path(a, b, { maxDepth = 8, maxVisited = 4_000_000, hide = [], minLen = 0, within = null, mutual = false } = {}) {
     if (a === b) return [a];
-    // The endpoints are the user's choice and always allowed; a hidden kind or a short
-    // article is only refused as a stepping stone. Without this every path went
-    // through a list page.
-    const ok = this.allow(hide, minLen);
+    // The endpoints are the user's choice and always allowed; a hidden kind, a short
+    // article or one outside the category is only refused as a stepping stone.
+    // Without this every path went through a list page.
+    const ok = this.allow(hide, minLen, within);
     // A mutual-only path is a chain of articles that each refer back to the previous
     // one: rarer, longer, and much more meaningful than a chain of mentions.
     const step = mutual ? (u) => this.mutual(u) : null;
@@ -364,8 +413,8 @@ export class WikiGraph {
    * tightens to articles that are mutually linked with both. Ranked by in-degree,
    * and each survivor is labelled with which side it is on so the card can say.
    */
-  common(a, b, { limit = 3000, hide = [], minLen = 0, mutual = false } = {}) {
-    const ok = this.allow(hide, minLen);
+  common(a, b, { limit = 3000, hide = [], minLen = 0, within = null, mutual = false } = {}) {
+    const ok = this.allow(hide, minLen, within);
     let cited, citing;
     if (mutual) {
       cited = citing = intersectSorted(this.mutual(a), this.mutual(b));
@@ -444,8 +493,8 @@ export class WikiGraph {
    * lets Float64Array.sort run without a comparator, which is what makes ordering
    * enwiki's 7M articles a sub-second startup cost rather than a 30-second one.
    */
-  top(limit = 3000, hide = [], minLen = 0) {
-    const ok = this.allow(hide, minLen);
+  top(limit = 3000, hide = [], minLen = 0, within = null) {
+    const ok = this.allow(hide, minLen, within);
     if (!this._topOrder) {
       const key = new Float64Array(this.n);
       for (let i = 0; i < this.n; i++) key[i] = this.indeg[i] * 16777216 + i;

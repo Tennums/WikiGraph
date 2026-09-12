@@ -31,6 +31,8 @@
   #mutualLabel { display: inline-flex; gap: 4px; align-items: center; cursor: pointer;
                  white-space: nowrap; padding-left: 10px; border-left: 1px solid #2c313a; }
   #mutualLabel input { margin: 0; accent-color: #9fd0ff; }
+  #withinLabel { padding-left: 10px; border-left: 1px solid #2c313a; }
+  #within { width: 160px; }
   #status { margin-left: auto; color: #8b93a1; }
   #status.err { color: #ff8b8b; }
 
@@ -91,6 +93,10 @@
     <input type="checkbox" id="mutual"> mutual links only
   </label>
 
+  <label for="within" id="withinLabel" title="Only articles filed under this category or its subcategories, three levels down. Seeds and path endpoints are always allowed.">within</label>
+  <input type="text" id="within" list="cathits" placeholder="any category">
+  <datalist id="cathits"></datalist>
+
   <span id="status">loading…</span>
 </div>
 
@@ -123,14 +129,26 @@ const markup = await (await fetch("vendor/page.html")).text();
  * button. The hash rather than the query string: it never reaches the server, so a
  * shared link is just a link and the API stays cacheable by path.
  */
-const FIELDS = ["view", "q", "q2", "limit", "hops", "minlen"];
+const FIELDS = ["view", "q", "q2", "limit", "hops", "minlen", "within"];
 const hideBoxes = () => [...document.querySelectorAll("#hide input")];
 const hideValue = () => hideBoxes().filter((b) => b.checked).map((b) => b.value).join(",");
 
 function readHash() {
   const h = new URLSearchParams(location.hash.replace(/^#/, ""));
   if (![...h.keys()].length) return false;
-  for (const f of FIELDS) if (h.has(f)) $(f).value = h.get(f);
+  for (const f of FIELDS) {
+    if (!h.has(f)) continue;
+    const el = $(f), v = h.get(f);
+    el.value = v;
+    // A shared link may carry a value the dropdown does not list (limit=600, say).
+    // Setting it leaves the select blank and the request without the value, so the
+    // option is added rather than the URL's intent dropped.
+    if (el.tagName === "SELECT" && el.value !== v && /^\d+$/.test(v)) {
+      const opt = new Option(v, v, true, true);
+      el.append(opt);
+      el.value = v;
+    }
+  }
   if (h.has("hide")) {
     const on = new Set(h.get("hide").split(","));
     for (const b of hideBoxes()) b.checked = on.has(b.value);
@@ -147,6 +165,8 @@ function writeHash(push) {
     if (f === "q2" && !["path", "common"].includes(view)) continue;
     if (f === "hops" && !["neighborhood", "in", "out"].includes(view)) continue;
     if (f === "q" && view === "top") continue;
+    // The category view is already a category; "within" would only repeat it.
+    if (f === "within" && (view === "category" || !$(f).value.trim())) continue;
     h.set(f, $(f).value.trim());
   }
   h.set("hide", hideValue());
@@ -163,8 +183,10 @@ async function draw({ push = true } = {}) {
   writeHash(push);
 
   const t = encodeURIComponent(q);
+  const w = $("within").value.trim();
   const hide = `&hide=${hideValue()}&minlen=${$("minlen").value}` +
-               ($("mutual").checked ? "&mutual=1" : "");
+               ($("mutual").checked ? "&mutual=1" : "") +
+               (w && view !== "category" ? `&within=${encodeURIComponent(w)}` : "");
   const url = (
     view === "top" ? `api/view/top?limit=${limit}`
     : view === "category" ? `api/view/category?title=${t}&limit=${limit}&depth=3`
@@ -220,7 +242,8 @@ async function draw({ push = true } = {}) {
   });
   const drawn = Math.round(performance.now() - t1);
 
-  status((data.pathTitles ? data.pathTitles.join(" → ") + " · " : "") +
+  status((data.within ? `${data.within.articles.toLocaleString()} articles under ${data.within.name} · ` : "") +
+         (data.pathTitles ? data.pathTitles.join(" → ") + " · " : "") +
          (data.common ? `both link to ${data.common.cited}, ${data.common.citing} link to both · ` : "") +
          `${data.nodes.length.toLocaleString()} articles · ` +
          `${data.edges.length.toLocaleString()} links · ${queried}ms query · ${drawn}ms draw`);
@@ -303,13 +326,28 @@ const typeahead = (el) => () => {
     const v = el.value.trim();
     if (v.length < 2) return;
     const kind = $("view").value === "category" ? "&kind=category" : "";
-    const hits = await (await fetch(`api/search?q=${encodeURIComponent(v)}&hide=${hideValue()}&minlen=${$("minlen").value}${kind}`)).json();
+    const w = $("within").value.trim();
+    const hits = await (await fetch(`api/search?q=${encodeURIComponent(v)}&hide=${hideValue()}&minlen=${$("minlen").value}${kind}` +
+                                    (w && !kind ? `&within=${encodeURIComponent(w)}` : ""))).json();
     $("hits").innerHTML = hits
       .map((h) => `<option value="${h.title.replace(/_/g, " ")}">`).join("");
   }, 180);
 };
 $("q").addEventListener("input", typeahead($("q")));
 $("q2").addEventListener("input", typeahead($("q2")));
+
+let catTimer;
+$("within").addEventListener("input", () => {
+  clearTimeout(catTimer);
+  catTimer = setTimeout(async () => {
+    const v = $("within").value.trim();
+    if (v.length < 2) return;
+    const hits = await (await fetch(`api/search?q=${encodeURIComponent(v)}&kind=category`)).json();
+    $("cathits").innerHTML = hits
+      .map((h) => `<option value="${h.title.replace(/_/g, " ")}">`).join("");
+  }, 180);
+});
+$("within").addEventListener("change", () => draw());
 
 const syncControls = () => {
   const view = $("view").value;
@@ -320,10 +358,12 @@ const syncControls = () => {
   $("q2").hidden = $("q2Label").hidden = !two;
   $("q2Label").textContent = view === "common" ? "×" : "→";
   $("q").placeholder = view === "category" ? "Physics (category name)" : "Physics";
+  $("within").disabled = $("withinLabel").hidden = view === "category";
+  $("within").hidden = view === "category";
 };
 $("view").addEventListener("change", syncControls);
 $("go").addEventListener("click", draw);
-for (const id of ["q", "q2"]) {
+for (const id of ["q", "q2", "within"]) {
   $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") draw(); });
 }
 

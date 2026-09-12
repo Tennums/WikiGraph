@@ -87,6 +87,13 @@ physicists leave; the two-hop mutual neighbourhood shares only a third of its ar
 the ordinary one and 87% of its internal links are reciprocal. The path *Cheese → History →
 Science → Black hole* becomes *Cheese → Bacteria → Water → Universe → Black hole*.
 
+**Any view can be restricted to a category** — *Around Einstein, within Science*. The
+category's subtree (three levels, `withindepth` to change it) becomes a one-byte-per-
+article mask that every selection tests against, alongside the kind and length filters;
+the last few masks are cached, since a walk over a big category is the expensive part of
+the request. Seeds and path endpoints are exempt as always. The category view itself does
+not offer it — it already is one.
+
 **Search is a title index**, FTS5 in its own sidecar `<wiki>.search.db`: each word typed
 becomes a prefix term, case-insensitive with diacritics folded, ranked by in-degree. So
 "einstein" finds *Albert Einstein* first, "alb ein" finds it too, and "zurich" finds
