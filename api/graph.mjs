@@ -88,6 +88,14 @@ function intersectSorted(a, b) {
   return out.subarray(0, k);
 }
 
+/**
+ * Categories that organise rather than describe: stub sorting, "X by country"
+ * containers, template and list holders, project bookkeeping. Fine to walk through,
+ * wrong to name a wedge after. Most are flagged hidden in `page_props` and caught by
+ * the flag; the pattern is for the wikis and cases that are not.
+ */
+const ORGANISING_CAT = /(_stubs?|_templates|-related_lists|_by_[a-z_]+|_redirects)$|^(Wikipedia|WikiProject|Redirects|Stubs?)_|_articles(_|$)/;
+
 /** Node kinds, as the ingest writes them into <wiki>.kind. */
 export const KIND = { article: 0, list: 1, date: 2, dab: 3, infra: 4 };
 export const KIND_NAMES = ["article", "list", "date", "dab", "infra"];
@@ -350,26 +358,39 @@ export class WikiGraph {
   /** Every article filed under `catPid`, walking `depth` levels of subcategories. */
   categorySubtree(catPid, { depth = 3, limit = 3000, hide = [], minLen = 0 } = {}) {
     const ok = this.allow(hide, minLen);
-    const kids = this.db.prepare("SELECT child FROM cat_tree WHERE parent = ?");
+    const kids = this.db.prepare(`SELECT t.child AS child, c.title AS title, c.hidden AS hidden
+                                  FROM cat_tree t JOIN category c ON c.pid = t.child
+                                  WHERE t.parent = ?`);
     const members = this.db.prepare("SELECT idx FROM node_cat WHERE cat = ?");
 
     // Which direct child of the root each category descends from -- this becomes the
     // wedge, and it is why the walk tracks a branch rather than just a visited set.
+    //
+    // A category that organises rather than describes (a stub bin, "Physicists by
+    // nationality", a hidden maintenance category) is walked through but never
+    // becomes a branch of its own: whatever is under it takes the branch of the
+    // nearest describing ancestor, or the root. Otherwise "Math stubs" is the
+    // largest wedge of Mathematics and thirty nationalities fragment Physicists.
     const branchOf = new Map([[catPid, catPid]]);
     const order = [catPid];
     let level = [catPid];
     for (let d = 0; d < depth; d++) {
-      const next = [];
+      const describing = [], organising = [];
       for (const c of level) {
         for (const r of kids.all(c)) {
           const child = Number(r.child);
           if (branchOf.has(child)) continue;
-          branchOf.set(child, d === 0 ? child : branchOf.get(c));
-          next.push(child);
-          order.push(child);
+          const org = Number(r.hidden) === 1 || ORGANISING_CAT.test(String(r.title));
+          branchOf.set(child, d === 0 && !org ? child : branchOf.get(c));
+          (org ? organising : describing).push(child);
         }
       }
+      // An article keeps the first category that claims it, so describing categories
+      // go first at every level: an article filed under both "Biologists" and
+      // "Biology stubs" belongs to the former.
+      const next = describing.concat(organising);
       if (!next.length) break;
+      order.push(...next);
       level = next;
     }
 

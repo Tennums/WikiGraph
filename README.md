@@ -97,7 +97,12 @@ docker compose --profile ingest run --rm ingest --wiki enwiki --index-only
 ```
 
 The category view pools its wedges: the twelve biggest subcategories keep their own
-slice and the rest share one, labelled with how many were folded in.
+slice and the rest share one, labelled with how many were folded in. Categories that
+organise rather than describe — stub bins, *Physicists by nationality*, template and list
+holders, anything flagged hidden — are walked through but never become a wedge; what is
+under them takes the nearest describing ancestor, or the root. And describing categories
+claim their members first, so an article filed under both *Biologists* and *Biology stubs*
+lands in the former. Before this, *Math stubs* was the largest wedge of Mathematics.
 
 Degree *on the disc* is recomputed over each selection rather than taken globally: the
 disc rings articles by the links it can actually see, and a global degree would pull

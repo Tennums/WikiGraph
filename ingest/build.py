@@ -178,6 +178,12 @@ RE_DATE = re.compile(
     r"(January|February|March|April|May|June|July|August|September|October|November|"
     r"December)_\d{1,2}|Deaths_in_\d{4}|\d{4}_in_.+)$")
 RE_DAB_TITLE = re.compile(r"_\(disambiguation\)$")
+# Categories that organise rather than describe -- stub bins, "X by country" containers,
+# template and list holders, project bookkeeping. Walked through, never used as a
+# topic label. Mirrors ORGANISING_CAT in api/graph.mjs; keep the two in step.
+RE_ORGANISING_CAT = re.compile(
+    r"(_stubs?|_templates|-related_lists|_by_[a-z_]+|_redirects)$"
+    r"|^(Wikipedia|WikiProject|Redirects|Stubs?)_|_articles(_|$)")
 
 
 def classify(titles, dab_idx, infra_titles):
@@ -629,7 +635,12 @@ def main() -> None:
         log("WARNING: no topic root found -- wedges will fall back to raw categories")
         topic_of_cat = {}
     else:
-        roots = [c for c in children[root] if c not in hidden]
+        # A topic is a direct child of the root that describes a subject. Hidden and
+        # organising categories are skipped: simplewiki files "Wikipedia articles by
+        # source" and "Good articles" beside Science and Geography, and neither is a
+        # wedge anyone wants.
+        roots = [c for c in children[root]
+                 if c not in hidden and not RE_ORGANISING_CAT.search(title_of.get(c, ""))]
         log(f"topics: {len(roots)} under {root_title} "
             f"({', '.join(title_of.get(c, '?') for c in roots[:8])}...)")
         # Multi-source BFS: whichever topic reaches a category first owns it, so a
