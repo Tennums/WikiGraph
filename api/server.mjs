@@ -54,7 +54,11 @@ for (const ext of ["csr", "rcsr", "db", "kind"]) {
 
 const graph = new WikiGraph(join(GRAPH_DIR, `${WIKI}.csr`), join(GRAPH_DIR, `${WIKI}.rcsr`),
                             join(GRAPH_DIR, `${WIKI}.db`), join(GRAPH_DIR, `${WIKI}.kind`),
-                            join(GRAPH_DIR, `${WIKI}.search.db`));
+                            join(GRAPH_DIR, `${WIKI}.search.db`), join(GRAPH_DIR, `${WIKI}.rank`));
+if (!graph.rank) {
+  console.log(`wikigraph: no ${WIKI}.rank -- ranking by in-degree only; add PageRank with\n` +
+              `  docker compose --profile ingest run --rm ingest --wiki ${WIKI} --rank-only`);
+}
 if (!graph.fts) {
   console.log(`wikigraph: no ${WIKI}.search.db -- title search is prefix-only; build it with\n` +
               `  docker compose --profile ingest run --rm ingest --wiki ${WIKI} --index-only`);
@@ -97,6 +101,9 @@ const within = (q) => {
   const depth = Math.max(1, Math.min(6, Number(q.get("withindepth")) || 3));
   return { mask: graph.categoryMask(pid, depth), name: name.replace(/_/g, " ") };
 };
+
+/** `rank=pagerank` -> rank frontiers, search and the top list by PageRank instead of in-degree. */
+const rankBy = (q) => (q.get("rank") === "pagerank" && graph.rank ? "pagerank" : "indegree");
 
 /** `group=cluster` -> wedges from the link structure itself, not the topic filing. */
 const groupBy = (q) => (q.get("group") === "cluster" ? "cluster" : "topic");
@@ -153,6 +160,7 @@ const server = createServer(async (req, res) => {
           maxNodes: MAX_NODES,
           kinds: Object.fromEntries(KIND_NAMES.map((k, i) => [k, graph.kindCounts[i]])),
           search: graph.fts ? "fulltext" : "prefix",
+          pagerank: !!graph.rank,
           minLenDefault: MIN_LEN_DEFAULT,
           // kiwix-serve exposes an article at /content/<book>/<Title>. The book name
           // is the ZIM's filename without its extension.
@@ -165,7 +173,7 @@ const server = createServer(async (req, res) => {
         }
         const w = within(q);
         if (w.error) return json(res, 200, []);
-        return json(res, 200, graph.search(q.get("q") ?? "", budget(q.get("limit"), 20), hidden(q), minLen(q), w.mask));
+        return json(res, 200, graph.search(q.get("q") ?? "", budget(q.get("limit"), 20), hidden(q), minLen(q), w.mask, rankBy(q)));
       }
 
       /* Every view returns the same VAULT_DATA shape; only the selection differs. */
@@ -181,7 +189,7 @@ const server = createServer(async (req, res) => {
           : ["in", "out", "both"].includes(q.get("direction")) ? q.get("direction") : "both";
         const w = within(q);
         if (w.error) return json(res, 404, { error: w.error });
-        const sel = graph.neighborhood(seed, { hops, limit, direction, hide: hidden(q), minLen: minLen(q), within: w.mask });
+        const sel = graph.neighborhood(seed, { hops, limit, direction, hide: hidden(q), minLen: minLen(q), within: w.mask, rankBy: rankBy(q) });
         const name = graph.titleOf(seed).replace(/_/g, " ");
         const title = (direction === "in" ? `What links to ${name}`
                     : direction === "out" ? `What ${name} links to`
@@ -215,7 +223,8 @@ const server = createServer(async (req, res) => {
         const per = Math.max(20, Math.floor((limit - path.length) / path.length));
         for (const u of path) {
           const near = graph.neighborhood(u, { hops: 1, limit: per + 1, hide, minLen: min,
-                                               within: w.mask, direction: mutual ? "mutual" : "both" });
+                                               within: w.mask, direction: mutual ? "mutual" : "both",
+                                               rankBy: rankBy(q) });
           for (const v of near.ids) if (!onPath.has(v) && ids.length < limit) { ids.push(v); onPath.add(v); }
         }
         const names = path.map((i) => graph.titleOf(i).replace(/_/g, " "));
@@ -244,7 +253,7 @@ const server = createServer(async (req, res) => {
         if (w.error) return json(res, 404, { error: w.error });
         const sel = graph.common(a, b, {
           limit: budget(q.get("limit"), 2500) - 2, hide: hidden(q), minLen: minLen(q),
-          within: w.mask, mutual,
+          within: w.mask, mutual, rankBy: rankBy(q),
         });
         const names = [graph.titleOf(a), graph.titleOf(b)].map((t) => t.replace(/_/g, " "));
         if (!sel.ids.length) {
@@ -286,8 +295,9 @@ const server = createServer(async (req, res) => {
         const w = within(q);
         if (w.error) return json(res, 404, { error: w.error });
         return json(res, 200, graph.toVaultData(
-          graph.top(budget(q.get("limit"), 2000), hidden(q), minLen(q), w.mask), {
-            title: `${WIKI} — most linked-to` + (w.name ? ` within ${w.name}` : ""),
+          graph.top(budget(q.get("limit"), 2000), hidden(q), minLen(q), w.mask, rankBy(q)), {
+            title: `${WIKI} — ${rankBy(q) === "pagerank" ? "highest PageRank" : "most linked-to"}` +
+                   (w.name ? ` within ${w.name}` : ""),
             mutual: wantMutual(q),
             group: groupBy(q),
           }));

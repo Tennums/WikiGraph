@@ -46,6 +46,24 @@ search hit, and the "most linked-to" list. Out-degree measures how much an artic
 and lists win it: by out-degree simplewiki's top articles are `List of municipalities in
 Switzerland` and `Deaths in 2024`. By in-degree they are `United States` and `France`.
 
+**PageRank is available as the alternative signal** — *Rank: by PageRank* — computed at
+ingest by power iteration over the CSR (30 iterations; 4 s on simplewiki, minutes on
+enwiki) into a float sidecar `<wiki>.rank`, or added to an existing build:
+
+```bash
+docker compose --profile ingest run --rm ingest --wiki enwiki --rank-only
+```
+
+In-degree counts links; PageRank weighs each by where it comes from, so a navbox on a
+thousand stubs counts for less than one link from a major article. At the very top the
+two agree, and both still put the infobox vocabulary first — the kind filter remains the
+answer for that. They disagree in the middle, which is where a view spends its budget:
+*most linked-to* on simplewiki is `United States, France, Communes of France, Departments
+of France…`; *highest PageRank* is `United States, France, United Kingdom, English
+language, Canada, India…`. Around *Physics* at one hop, in-degree picks *Islam,
+Afghanistan, Science fiction* among the first eight; PageRank picks *Mathematics, Science,
+Number, Electricity*. The run prints both top-20s side by side.
+
 **Four kinds of page can be hidden from every view** — lists, date pages, disambiguation
 pages, and what the UI calls *infobox links*: articles such as `Population`, `Time zone`
 or `Wayback Machine` that every place or biography links to from a template. They are
@@ -190,7 +208,7 @@ All state lives on the NAS under `DATA_DIR`; the containers hold nothing of thei
 ```
 /media/vault/WikiGraph/
 ├── dumps/     enwiki-latest-*.sql.gz     (input, mounted read-only)
-├── graph/     enwiki.{csr,rcsr,db,kind,search.db}   (built once, then read-only)
+├── graph/     enwiki.{csr,rcsr,db,kind,rank,search.db}   (built once, then read-only)
 └── zim/       <ZIM_BOOK>.zim              (Kiwix)
 ```
 

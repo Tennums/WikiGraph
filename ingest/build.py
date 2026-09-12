@@ -158,6 +158,53 @@ def write_reverse(csr: Path, rcsr: Path) -> None:
         f"max in-degree {int(indeg.max()):,}")
 
 
+def write_pagerank(csr: Path, out: Path, wiki: str, damping: float = 0.85,
+                   iterations: int = 30) -> np.ndarray:
+    """PageRank by power iteration over the forward CSR, written as <wiki>.rank.
+
+    In-degree counts links; PageRank weighs each by the rank of the page it comes from
+    and the number of links that page spreads it over. The two mostly agree at the top
+    and disagree in the middle, which is where a view spends its budget.
+
+    One pass per iteration over the edge list in blocks: for a block of edges the
+    source of each is recovered from the offsets (the article whose slice spans it),
+    and a bincount over the targets accumulates r[src] / outdeg[src]. Dangling pages --
+    no out-links -- hand their rank to everyone, as the standard formulation has it.
+    enwiki: ~712M edges, a few seconds per iteration, minutes in all.
+    """
+    head = np.fromfile(csr, dtype=np.int64, count=4)
+    n, m = int(head[2]), int(head[3])
+    offsets = np.fromfile(csr, dtype=np.int64, count=n + 1, offset=HEADER)
+    targets = np.memmap(csr, dtype=np.int32, mode="r", offset=HEADER + 8 * (n + 1), shape=(m,))
+    outdeg = np.diff(offsets).astype(np.float64)
+    dangling = outdeg == 0
+    inv_out = np.where(dangling, 0.0, 1.0 / np.maximum(outdeg, 1))
+
+    log(f"pagerank over {n:,} articles, {m:,} links: {iterations} iterations ...")
+    r = np.full(n, 1.0 / n)
+    block = 1 << 22
+    for it in range(iterations):
+        w = r * inv_out                      # what each page sends down each link
+        acc = np.zeros(n)
+        for a in range(0, m, block):
+            b = min(a + block, m)
+            src = np.searchsorted(offsets, np.arange(a, b), side="right") - 1
+            acc += np.bincount(np.asarray(targets[a:b]), weights=w[src], minlength=n)
+        leaked = r[dangling].sum()           # dangling mass, spread evenly
+        r_new = (1 - damping) / n + damping * (acc + leaked / n)
+        delta = np.abs(r_new - r).sum()
+        r = r_new
+        if delta < 1e-9:
+            log(f"  converged after {it + 1} iterations (delta {delta:.2e})")
+            break
+    path = out / f"{wiki}.rank"
+    with open(path, "wb") as fh:
+        np.array([MAGIC, 1, n, 0], dtype=np.int64).tofile(fh)
+        r.astype(np.float32).tofile(fh)
+    log(f"wrote {path} ({path.stat().st_size / 1e6:.0f} MB)")
+    return r
+
+
 import re
 
 # Node kinds, one byte per article in <wiki>.kind. The API hides kinds on request; the
@@ -277,6 +324,9 @@ def main() -> None:
     ap.add_argument("--reverse-only", action="store_true",
                     help="derive the in-link .rcsr from an existing .csr and stop; "
                          "reads no dumps, touches no database")
+    ap.add_argument("--rank-only", action="store_true",
+                    help="compute PageRank from an existing .csr into <wiki>.rank and "
+                         "stop; reads no dumps")
     ap.add_argument("--index-only", action="store_true",
                     help="build the title search index <wiki>.search.db for an "
                          "existing build; reads only the existing .db and .rcsr")
@@ -303,6 +353,26 @@ def main() -> None:
         if not csr.exists():
             sys.exit(f"--reverse-only needs an existing {csr}")
         write_reverse(csr, args.out / f"{args.wiki}.rcsr")
+        return
+
+    if args.rank_only:
+        csr = args.out / f"{args.wiki}.csr"
+        if not csr.exists():
+            sys.exit(f"--rank-only needs an existing {csr}")
+        r = write_pagerank(csr, args.out, args.wiki)
+        # Side by side with in-degree, so the two rankings can be compared at a glance.
+        db = args.out / f"{args.wiki}.db"
+        rcsr = args.out / f"{args.wiki}.rcsr"
+        if db.exists() and rcsr.exists():
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            title = dict(con.execute("SELECT idx, title FROM node"))
+            con.close()
+            hn = int(np.fromfile(rcsr, dtype=np.int64, count=4)[2])
+            indeg = np.diff(np.fromfile(rcsr, dtype=np.int64, count=hn + 1, offset=HEADER))
+            top_r, top_i = np.argsort(-r)[:20], np.argsort(-indeg)[:20]
+            log("top 20 by PageRank                       | top 20 by in-degree")
+            for x, y in zip(top_r, top_i):
+                log(f"  {title[int(x)][:38]:38} | {title[int(y)][:38]}")
         return
 
     if args.index_only:
@@ -739,6 +809,7 @@ def main() -> None:
     indeg = np.diff(np.fromfile(rcsr, dtype=np.int64, count=rn + 1, offset=HEADER))
     write_kinds(args.out, args.wiki, art_title, dab_idx, indeg)
     write_search_index(args.out, args.wiki, tmp, art_title, indeg)
+    write_pagerank(csr, args.out, args.wiki)
 
 
 if __name__ == "__main__":

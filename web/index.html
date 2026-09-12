@@ -78,6 +78,12 @@
     <option value="cluster">by cluster</option>
   </select>
 
+  <label for="rank" id="rankLabel" title="What 'important' means when a view chooses which articles to show. In-degree counts links; PageRank weighs each by where it comes from, so a mention in a navbox on a thousand stubs counts for less than one from a major article.">Rank</label>
+  <select id="rank">
+    <option value="indegree" selected>by in-degree</option>
+    <option value="pagerank">by PageRank</option>
+  </select>
+
   <span id="hide" title="Kinds of page to leave out of every view">
     <label>Hide</label>
     <label><input type="checkbox" value="list" checked> lists</label>
@@ -135,7 +141,7 @@ const markup = await (await fetch("vendor/page.html")).text();
  * button. The hash rather than the query string: it never reaches the server, so a
  * shared link is just a link and the API stays cacheable by path.
  */
-const FIELDS = ["view", "q", "q2", "limit", "hops", "minlen", "within", "group"];
+const FIELDS = ["view", "q", "q2", "limit", "hops", "minlen", "within", "group", "rank"];
 const hideBoxes = () => [...document.querySelectorAll("#hide input")];
 const hideValue = () => hideBoxes().filter((b) => b.checked).map((b) => b.value).join(",");
 
@@ -161,6 +167,7 @@ function readHash() {
   }
   $("mutual").checked = h.get("mutual") === "1";
   if (!h.has("group")) $("group").value = "topic";
+  if (!h.has("rank")) $("rank").value = "indegree";
   return true;
 }
 
@@ -173,6 +180,7 @@ function writeHash(push) {
     if (f === "hops" && !["neighborhood", "in", "out"].includes(view)) continue;
     if (f === "q" && view === "top") continue;
     if (f === "group" && $(f).value === "topic") continue;
+    if (f === "rank" && $(f).value === "indegree") continue;
     // The category view is already a category; "within" would only repeat it.
     if (f === "within" && (view === "category" || !$(f).value.trim())) continue;
     h.set(f, $(f).value.trim());
@@ -192,7 +200,7 @@ async function draw({ push = true } = {}) {
 
   const t = encodeURIComponent(q);
   const w = $("within").value.trim();
-  const hide = `&hide=${hideValue()}&minlen=${$("minlen").value}&group=${$("group").value}` +
+  const hide = `&hide=${hideValue()}&minlen=${$("minlen").value}&group=${$("group").value}&rank=${$("rank").value}` +
                ($("mutual").checked ? "&mutual=1" : "") +
                (w && view !== "category" ? `&within=${encodeURIComponent(w)}` : "");
   const url = (
@@ -342,7 +350,7 @@ const typeahead = (el) => () => {
     if (v.length < 2) return;
     const kind = $("view").value === "category" ? "&kind=category" : "";
     const w = $("within").value.trim();
-    const hits = await (await fetch(`api/search?q=${encodeURIComponent(v)}&hide=${hideValue()}&minlen=${$("minlen").value}${kind}` +
+    const hits = await (await fetch(`api/search?q=${encodeURIComponent(v)}&hide=${hideValue()}&minlen=${$("minlen").value}&rank=${$("rank").value}${kind}` +
                                     (w && !kind ? `&within=${encodeURIComponent(w)}` : ""))).json();
     $("hits").innerHTML = hits
       .map((h) => `<option value="${h.title.replace(/_/g, " ")}">`).join("");
@@ -390,6 +398,10 @@ for (const b of hideBoxes()) {
 $("mutual").addEventListener("change", () => draw());
 $("minlen").addEventListener("change", () => draw());
 $("group").addEventListener("change", () => draw());
+$("rank").addEventListener("change", () => draw());
+// Without the .rank sidecar there is nothing to choose; hide the control rather than
+// offer an option that silently falls back.
+if (info.pagerank === false) { $("rank").hidden = $("rankLabel").hidden = true; }
 // The server's default, so a URL without minlen and the dropdown agree.
 if (info.minLenDefault !== undefined && !location.hash.includes("minlen=")) {
   $("minlen").value = String(info.minLenDefault);

@@ -103,8 +103,8 @@ export const KIND_NAMES = ["article", "list", "date", "dab", "infra"];
 
 export class WikiGraph {
   /** @param {string} csrPath @param {string} rcsrPath @param {string} dbPath
-   *  @param {string} kindPath @param {string} [searchPath] */
-  constructor(csrPath, rcsrPath, dbPath, kindPath, searchPath) {
+   *  @param {string} kindPath @param {string} [searchPath] @param {string} [rankPath] */
+  constructor(csrPath, rcsrPath, dbPath, kindPath, searchPath, rankPath) {
     this.out = new Csr(csrPath);   // who this article links to
     this.in = new Csr(rcsrPath);   // who links to this article
     if (this.in.n !== this.out.n || this.in.m !== this.out.m) {
@@ -118,7 +118,6 @@ export class WikiGraph {
     // Out-degree measures how much an article lists, and lists win it; in-degree
     // measures how much the rest of the wiki refers to it.
     this.indeg = this.in.degrees();
-    this._topOrder = null;
     this._maskCache = new Map();
 
     // One byte per article: list, date page, disambiguation, template-linked
@@ -151,6 +150,23 @@ export class WikiGraph {
     for (const r of this.db.prepare("SELECT idx, len FROM node").iterate()) {
       this.len[r.idx] = r.len;
     }
+
+    // Optional: PageRank, a float per article. In-degree counts links; PageRank weighs
+    // each by where it comes from. Either can be the importance signal for a request
+    // (`rankBy`); the default stays in-degree, which needs no extra file.
+    this.rank = null;
+    if (rankPath && existsSync(rankPath)) {
+      const rb = Buffer.allocUnsafe(HEADER);
+      const rfd = openSync(rankPath, "r");
+      readSync(rfd, rb, 0, HEADER, 0);
+      if (Number(rb.readBigInt64LE(0)) === MAGIC && Number(rb.readBigInt64LE(16)) === this.n) {
+        const rbuf = Buffer.allocUnsafe(this.n * 4);
+        readSync(rfd, rbuf, 0, this.n * 4, HEADER);
+        this.rank = new Float32Array(rbuf.buffer, rbuf.byteOffset, this.n);
+      }
+      closeSync(rfd);
+    }
+    this._topOrders = new Map();
 
     // Optional: the FTS5 title index. Without it search falls back to a case-sensitive
     // prefix LIKE, which is what it was, so an older build keeps working -- just worse.
@@ -229,6 +245,11 @@ export class WikiGraph {
     return mask;
   }
 
+  /** The importance array a request ranks by: in-degree, or PageRank when asked and present. */
+  score(rankBy = "indegree") {
+    return rankBy === "pagerank" && this.rank ? this.rank : this.indeg;
+  }
+
   /** Out-neighbours; kept under the old name because toVaultData draws edges from it. */
   neighbours(idx) { return this.out.neighbours(idx); }
 
@@ -266,8 +287,9 @@ export class WikiGraph {
    * finds Albert Einstein and "einstein" finds it too -- case-insensitive, diacritics
    * folded. Without it: the old prefix LIKE, fetched wide and re-ranked here.
    */
-  search(q, limit = 20, hide = [], minLen = 0, within = null) {
+  search(q, limit = 20, hide = [], minLen = 0, within = null, rankBy = "indegree") {
     const ok = this.allow(hide, minLen, within);
+    const score = this.score(rankBy);
     const text = String(q).trim();
     if (!text) return [];
 
@@ -280,9 +302,11 @@ export class WikiGraph {
       const match = terms.map((w) => `"${w}"*`).join(" ");
       // ORDER BY over an unindexed column materialises every match, so a one-letter
       // prefix is the slow case; the UI asks for two characters or more.
+      // The index can only pre-sort by in-degree; when ranking by PageRank a wider net
+      // is fetched and re-ranked here, since the two orders differ in the middle.
       rows = this.fts
         .prepare("SELECT idx, title FROM titles WHERE titles MATCH ? ORDER BY indeg DESC LIMIT ?")
-        .all(match, limit * 5)
+        .all(match, rankBy === "pagerank" ? limit * 25 : limit * 5)
         .map((r) => ({ idx: Number(r.idx), title: String(r.title).replace(/ /g, "_") }));
     } else {
       rows = this.db
@@ -291,9 +315,9 @@ export class WikiGraph {
         .map((r) => ({ idx: Number(r.idx), title: String(r.title) }));
     }
     return rows
-      .map((h) => ({ ...h, deg: this.indeg[h.idx] }))
+      .map((h) => ({ ...h, deg: this.indeg[h.idx], score: score[h.idx] }))
       .filter((h) => ok(h.idx))
-      .sort((a, b) => b.deg - a.deg)
+      .sort((a, b) => b.score - a.score)
       .slice(0, limit);
   }
 
@@ -325,8 +349,9 @@ export class WikiGraph {
    * `direction` is which links to follow: "out" (what this article cites), "in" (what
    * cites it -- "what links here"), "both", or "mutual" (only links that go both ways).
    */
-  neighborhood(seed, { hops = 2, limit = 3000, direction = "both", hide = [], minLen = 0, within = null } = {}) {
+  neighborhood(seed, { hops = 2, limit = 3000, direction = "both", hide = [], minLen = 0, within = null, rankBy = "indegree" } = {}) {
     const ok = this.allow(hide, minLen, within);
+    const score = this.score(rankBy);
     const expand = (u) => {
       if (direction === "out") return [this.out.neighbours(u)];
       if (direction === "in") return [this.in.neighbours(u)];
@@ -340,7 +365,7 @@ export class WikiGraph {
       for (const u of frontier) {
         for (const list of expand(u)) {
           for (const v of list) {
-            if (!seen.has(v) && !next.has(v) && ok(v)) next.set(v, this.indeg[v]);
+            if (!seen.has(v) && !next.has(v) && ok(v)) next.set(v, score[v]);
           }
         }
       }
@@ -414,8 +439,9 @@ export class WikiGraph {
    * tightens to articles that are mutually linked with both. Ranked by in-degree,
    * and each survivor is labelled with which side it is on so the card can say.
    */
-  common(a, b, { limit = 3000, hide = [], minLen = 0, within = null, mutual = false } = {}) {
+  common(a, b, { limit = 3000, hide = [], minLen = 0, within = null, mutual = false, rankBy = "indegree" } = {}) {
     const ok = this.allow(hide, minLen, within);
+    const score = this.score(rankBy);
     let cited, citing;
     if (mutual) {
       cited = citing = intersectSorted(this.mutual(a), this.mutual(b));
@@ -429,7 +455,7 @@ export class WikiGraph {
       if (v === a || v === b || !ok(v)) continue;
       role.set(v, role.has(v) ? "linked both ways with both" : "links to both");
     }
-    const ids = [...role.keys()].sort((x, y) => this.indeg[y] - this.indeg[x]).slice(0, limit);
+    const ids = [...role.keys()].sort((x, y) => score[y] - score[x]).slice(0, limit);
     return { ids, role, cited: cited.length, citing: citing.length };
   }
 
@@ -494,17 +520,25 @@ export class WikiGraph {
    * lets Float64Array.sort run without a comparator, which is what makes ordering
    * enwiki's 7M articles a sub-second startup cost rather than a 30-second one.
    */
-  top(limit = 3000, hide = [], minLen = 0, within = null) {
+  top(limit = 3000, hide = [], minLen = 0, within = null, rankBy = "indegree") {
     const ok = this.allow(hide, minLen, within);
-    if (!this._topOrder) {
+    const useRank = rankBy === "pagerank" && this.rank;
+    const cacheKey = useRank ? "pagerank" : "indegree";
+    if (!this._topOrders.has(cacheKey)) {
+      // PageRank is a float in (0, 1); scaled by 2^28 it becomes an integer that keeps
+      // ~3.7e-9 of resolution -- plenty to order the top thousands, where the values
+      // are 1e-5 and up -- and still packs beside a 24-bit index below 2^53.
+      const score = useRank ? this.rank : this.indeg;
+      const scale = useRank ? 268435456 : 1;
       const key = new Float64Array(this.n);
-      for (let i = 0; i < this.n; i++) key[i] = this.indeg[i] * 16777216 + i;
+      for (let i = 0; i < this.n; i++) key[i] = Math.round(score[i] * scale) * 16777216 + i;
       key.sort();
-      this._topOrder = key;
+      this._topOrders.set(cacheKey, key);
     }
+    const order = this._topOrders.get(cacheKey);
     const out = [];
     for (let k = this.n - 1; k >= 0 && out.length < limit; k--) {
-      const idx = this._topOrder[k] % 16777216;
+      const idx = order[k] % 16777216;
       if (ok(idx)) out.push(idx);
     }
     return out;
