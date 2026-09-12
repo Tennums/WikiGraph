@@ -72,6 +72,11 @@ What a view is about sits in the hub — upstream's "pin to hub", applied by the
 article a neighbourhood is drawn around, every step of a path, both seeds of common
 ground. Walking with *Draw around this* moves the pin with you.
 
+The walk is visible: a strip under the bar lists the articles you have drawn around —
+*Physics → Einstein → Curie* — each a link back to that disc. Jumping along it moves a
+marker; stepping somewhere new from the middle branches from there. Session-only, cleared
+with ×; past eight steps the middle collapses to an ellipsis.
+
 Every view is a URL. The controls mirror into the hash —
 `#view=path&q=Cheese&q2=Black+hole&limit=1000` — so a view can be bookmarked or sent,
 and the browser's back button retraces a walk. The detail card's **Draw around this**

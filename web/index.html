@@ -43,6 +43,18 @@
   #status { margin-left: auto; color: #8b93a1; }
   #status.err { color: #ff8b8b; }
 
+  #trail { display: flex; gap: 6px; align-items: center; padding: 4px 12px;
+           background: #181b20; border-bottom: 1px solid #2c313a; color: #8b93a1;
+           font-size: 12px; overflow: hidden; white-space: nowrap; }
+  #trail[hidden] { display: none; }
+  #trailItems { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  #trailItems a { color: #c4c9d2; text-decoration: none; padding: 1px 4px; border-radius: 3px; }
+  #trailItems a:hover { background: #23272f; color: #e8e8ea; }
+  #trailItems a.here { color: #9fd0ff; font-weight: 600; }
+  #trailItems .sep { margin: 0 2px; color: #4a5160; }
+  #trailClear { padding: 0 6px; font: inherit; color: #8b93a1; background: transparent;
+                border: 1px solid transparent; }
+  #trailClear:hover { border-color: #333944; color: #e8e8ea; }
   #game { display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
           padding: 6px 12px; background: #1f2a1c; border-bottom: 1px solid #2f4a2a; }
   /* An author `display` beats the browser's own [hidden] rule, so the attribute alone
@@ -157,6 +169,11 @@
   <datalist id="cathits"></datalist>
 
   <span id="status">loading…</span>
+</div>
+
+<div id="trail" hidden>
+  <span id="trailItems"></span>
+  <button id="trailClear" title="Forget this walk">&times;</button>
 </div>
 
 <div id="game" hidden>
@@ -351,6 +368,9 @@ async function draw({ push = true, fromGame = false } = {}) {
     const vq = $("mount").querySelector("#vg-q");
     if (vq) { vq.value = game.to; vq.dispatchEvent(new Event("input", { bubbles: true })); }
   }
+
+  // The seed's canonical title (it is the pinned node), not what was typed.
+  trailRecord(view, data.pinned?.length ? data.nodes[Number(data.pinned[0])].label : q);
 
   status((data.within ? `${data.within.articles.toLocaleString()} articles under ${data.within.name} · ` : "") +
          (data.pathTitles ? data.pathTitles.join(" → ") + " · " : "") +
@@ -656,6 +676,61 @@ function firstParagraph(doc) {
   }
   return null;
 }
+
+/**
+ * The walk, made visible. Every draw of a neighbourhood-type view around a new
+ * article adds a step; the strip shows them in order and each is a link back to that
+ * disc -- its hash, restored without touching the browser history, which is the
+ * other, blind record of the same walk. Session-only: a walk is a session, not a
+ * place. Distinct from the game bar (a game) and from the card's own trail (moves
+ * within one disc).
+ */
+const trail = { steps: [], at: -1, jumping: false };
+
+function trailRecord(view, q) {
+  if (!["neighborhood", "in", "out"].includes(view) || !q) return;
+  // A jump along the strip only moves the marker; it is not a new step.
+  if (trail.jumping) { trail.jumping = false; renderTrail(); return; }
+  const here = trail.steps[trail.at];
+  if (here && here.q === q && here.view === view) { renderTrail(); return; }   // redraw in place
+  // Stepping back and then somewhere new starts a new branch from that point.
+  if (trail.at >= 0 && trail.at < trail.steps.length - 1) trail.steps.length = trail.at + 1;
+  trail.steps.push({ view, q, hash: location.hash });
+  trail.at = trail.steps.length - 1;
+  renderTrail();
+}
+
+function renderTrail() {
+  const el = $("trail");
+  if (trail.steps.length < 2) { el.hidden = true; return; }
+  el.hidden = false;
+  const items = trail.steps.map((s, i) => {
+    const a = document.createElement("a");
+    a.href = s.hash;
+    a.textContent = s.q;
+    a.title = s.view === "in" ? `what links to ${s.q}` : s.view === "out" ? `what ${s.q} links to` : `around ${s.q}`;
+    if (i === trail.at) a.classList.add("here");
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      trail.at = i;
+      trail.jumping = true;
+      history.pushState(null, "", s.hash);
+      readHash(); syncControls();
+      draw({ push: false, fromGame: !!game });
+    });
+    return a;
+  });
+  // Past eight, collapse the middle: the start and the last few are what you reach for.
+  const shown = items.length > 8 ? [items[0], "…", ...items.slice(-6)] : items;
+  const box = $("trailItems");
+  box.replaceChildren();
+  shown.forEach((it, i) => {
+    if (i) { const sep = document.createElement("span"); sep.className = "sep"; sep.textContent = "→"; box.append(sep); }
+    box.append(it === "…" ? Object.assign(document.createElement("span"), { textContent: "…", className: "sep" }) : it);
+  });
+}
+
+$("trailClear").addEventListener("click", () => { trail.steps = []; trail.at = -1; renderTrail(); });
 
 /**
  * Six degrees. Two random well-linked articles; the player walks from one to the other
