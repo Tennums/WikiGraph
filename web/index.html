@@ -42,6 +42,7 @@
   #gameTrail { color: #8b93a1; }
   #gameResult { color: #e8e8ea; }
   #game button { padding: 2px 8px; }
+  #gameClose { margin-left: auto; }
   #mount { flex: 1; min-height: 0; position: relative; }
   #mount > .vault-graph { height: 100%; }
 </style>
@@ -127,6 +128,7 @@
   <button id="gameShortest" hidden>Show the shortest path</button>
   <button id="gameAgain" hidden>Play again</button>
   <button id="gameQuit">Give up</button>
+  <button id="gameClose" title="Close the game" aria-label="Close the game">&times;</button>
 </div>
 
 <div id="mount"></div>
@@ -209,7 +211,12 @@ function writeHash(push) {
   if (push) history.pushState(null, "", next); else history.replaceState(null, "", next);
 }
 
-async function draw({ push = true } = {}) {
+async function draw({ push = true, fromGame = false } = {}) {
+  // The game bar belongs to a game in progress. A draw the game did not ask for --
+  // the Draw button, a changed view or filter, Surprise me, the back button -- means
+  // the player has moved on, so the game ends and its bar goes with it.
+  if (game && !fromGame) endGame();
+
   const view = $("view").value;
   const q = $("q").value.trim();
   const limit = $("limit").value;
@@ -267,8 +274,9 @@ async function draw({ push = true } = {}) {
       $("view").value = "neighborhood";
       $("q").value = label;
       syncControls();
+      const playing = !!game && !game.done;
       gameStep(label);
-      draw();
+      draw({ fromGame: playing || (!!game && game.done) });
     },
     // The first paragraph, from Kiwix, in the card. Only offered when a reader is
     // configured; without one the card simply has no preview block.
@@ -408,7 +416,12 @@ async function startGame() {
   $("view").value = "neighborhood";
   $("q").value = pair.from;
   syncControls();
-  draw();
+  draw({ fromGame: true });
+}
+
+function endGame() {
+  game = null;
+  $("game").hidden = true;
 }
 
 function renderGame() {
@@ -437,15 +450,16 @@ function finishGame(gaveUp = false) {
 }
 
 $("play").addEventListener("click", startGame);
-$("gameQuit").addEventListener("click", () => finishGame(true));
 $("gameAgain").addEventListener("click", startGame);
+$("gameClose").addEventListener("click", endGame);
 $("gameShortest").addEventListener("click", () => {
   $("view").value = "path";
   $("q").value = game.from;
   $("q2").value = game.to;
   syncControls();
-  draw();
+  draw({ fromGame: true });
 });
+$("gameQuit").addEventListener("click", () => finishGame(true));
 
 // Typeahead straight off the title index, shared by both inputs.
 let searchTimer;
