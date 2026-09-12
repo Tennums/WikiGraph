@@ -169,6 +169,23 @@ which a hub cannot win by size alone. The implementation (`api/cluster.mjs`) is
 dependency-free, deterministic — same view, same partition, every time — and takes 20–40
 ms on a 1,500-node disc.
 
+**Two more lenses.** *Wedges: by hop distance* (`group=hops`, neighbourhood views only)
+makes the wedges the shells of the neighbourhood — *the seed*, *1 hop away*, *2 hops away*.
+Since the disc rings articles by the links it can see, and everything one hop out is
+linked to the seed, the shells come out concentric: on *Around Physics* the inner ring is
+the 922 articles Physics links to or is linked from, the outer the 577 they reach. Never
+pooled; the seed is a wedge of one on purpose.
+
+*Dots: by in-degree | PageRank | length* (`size=`) changes what a dot's radius shows. By
+default it is the degree on the disc, which is also what places the dot. The alternative
+travels as a `size` of 0..1 per node — log-scaled and normalised over the selection, since
+in-degree runs from one to half a million and on a linear scale every dot but *United
+States* would be the minimum — and the page uses it for the radius alone, so switching
+lenses changes no dot's place. On a *most linked-to* view by in-degree the largest dots are
+*United States* and *France*; the big dots on the rim are the ones the lens exists for —
+*Communes of France*, cited by thousands of stubs the length filter hides, so barely linked
+on the disc and enormous in the wiki.
+
 **Search is a title index**, FTS5 in its own sidecar `<wiki>.search.db`: each word typed
 becomes a prefix term, case-insensitive with diacritics folded, ranked by in-degree. So
 "einstein" finds *Albert Einstein* first, "alb ein" finds it too, and "zurich" finds

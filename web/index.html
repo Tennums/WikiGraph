@@ -131,10 +131,19 @@
   <button id="random" title="A random well-linked article as the centre, respecting the filters. With 'Draw around this' on the card, an aimless walk.">&#127922; Surprise me</button>
   <button id="play" title="Six degrees: two random articles; get from one to the other by clicking 'Draw around this', then see how your route compares with the shortest.">&#127919; Six degrees</button>
 
-  <label for="group" title="Topic: how the wiki files these articles. Cluster: how they actually hang together, by modularity on the links drawn — each wedge named after its three most linked-to members.">Wedges</label>
+  <label for="group" title="Topic: how the wiki files these articles. Cluster: how they actually hang together, by modularity on the links drawn — each wedge named after its three most linked-to members. Hop distance: the shells of the neighbourhood — the seed, what it links to, what those link to.">Wedges</label>
   <select id="group">
     <option value="topic" selected>by topic</option>
     <option value="cluster">by cluster</option>
+    <option value="hops" id="groupHops">by hop distance</option>
+  </select>
+
+  <label for="size" id="sizeLabel" title="What a dot's size shows. Links drawn: its degree on this disc (the default, and what also places it). In-degree: how many articles in the whole wiki link to it. PageRank: the same, weighed by who does the linking. Length: the article's size in bytes. Log-scaled, so hubs stand out without everything else vanishing.">Dots</label>
+  <select id="size">
+    <option value="degree" selected>by links drawn</option>
+    <option value="indegree">by in-degree</option>
+    <option value="pagerank" id="sizePagerank">by PageRank</option>
+    <option value="length">by length</option>
   </select>
 
   <label for="rank" id="rankLabel" title="What 'important' means when a view chooses which articles to show. In-degree counts links; PageRank weighs each by where it comes from, so a mention in a navbox on a thousand stubs counts for less than one from a major article.">Rank</label>
@@ -228,7 +237,7 @@ const markup = await (await fetch("vendor/page.html")).text();
  * button. The hash rather than the query string: it never reaches the server, so a
  * shared link is just a link and the API stays cacheable by path.
  */
-const FIELDS = ["view", "q", "q2", "limit", "hops", "minlen", "within", "group", "rank"];
+const FIELDS = ["view", "q", "q2", "limit", "hops", "minlen", "within", "group", "rank", "size"];
 const hideBoxes = () => [...document.querySelectorAll("#hide input")];
 const hideValue = () => hideBoxes().filter((b) => b.checked).map((b) => b.value).join(",");
 
@@ -255,6 +264,7 @@ function readHash() {
   $("mutual").checked = h.get("mutual") === "1";
   if (!h.has("group")) $("group").value = "topic";
   if (!h.has("rank")) $("rank").value = "indegree";
+  if (!h.has("size")) $("size").value = "degree";
   return true;
 }
 
@@ -268,6 +278,7 @@ function writeHash(push) {
     if (f === "q" && view === "top") continue;
     if (f === "group" && $(f).value === "topic") continue;
     if (f === "rank" && $(f).value === "indegree") continue;
+    if (f === "size" && $(f).value === "degree") continue;
     // The category view is already a category; "within" would only repeat it.
     if (f === "within" && (view === "category" || !$(f).value.trim())) continue;
     h.set(f, $(f).value.trim());
@@ -292,7 +303,7 @@ async function draw({ push = true, fromGame = false } = {}) {
 
   const t = encodeURIComponent(q);
   const w = $("within").value.trim();
-  const hide = `&hide=${hideValue()}&minlen=${$("minlen").value}&group=${$("group").value}&rank=${$("rank").value}` +
+  const hide = `&hide=${hideValue()}&minlen=${$("minlen").value}&group=${$("group").value}&rank=${$("rank").value}&size=${$("size").value}` +
                ($("mutual").checked ? "&mutual=1" : "") +
                (w && view !== "category" ? `&within=${encodeURIComponent(w)}` : "");
   const url = (
@@ -356,9 +367,11 @@ async function draw({ push = true, fromGame = false } = {}) {
   const drawn = Math.round(performance.now() - t1);
   // The legend heading is static markup; say what the wedges are this time.
   const heading = $("mount").querySelector("#vg-legend")?.previousElementSibling?.querySelector(".lbl")
-    ?? [...$("mount").querySelectorAll(".lbl")].find((el) => /^(Topics|Clusters|Subcategories)/.test(el.textContent));
+    ?? [...$("mount").querySelectorAll(".lbl")].find((el) => /^(Topics|Clusters|Hops|Subcategories)/.test(el.textContent));
   if (heading) {
-    const word = $("group").value === "cluster" ? "Clusters" : view === "category" ? "Subcategories" : "Topics";
+    const g = $("group").value;
+    const word = g === "cluster" ? "Clusters" : g === "hops" && nbhdView(view) ? "Hops"
+               : view === "category" ? "Subcategories" : "Topics";
     heading.childNodes[0].textContent = word + " ";
   }
 
@@ -853,11 +866,16 @@ $("within").addEventListener("input", () => {
 });
 $("within").addEventListener("change", () => draw());
 
+const nbhdView = (view) => ["neighborhood", "in", "out"].includes(view);
 const syncControls = () => {
   const view = $("view").value;
   $("q").disabled = view === "top";
-  const nbhd = ["neighborhood", "in", "out"].includes(view);
+  const nbhd = nbhdView(view);
   $("hops").hidden = $("hopsLabel").hidden = !nbhd;
+  // Hop distance is a neighbourhood's grouping; the other views have no hops. The
+  // option goes away with them, and a selection of it falls back to topics.
+  $("groupHops").hidden = $("groupHops").disabled = !nbhd;
+  if (!nbhd && $("group").value === "hops") $("group").value = "topic";
   const two = ["path", "common"].includes(view);
   $("q2").hidden = $("q2Label").hidden = !two;
   $("q2Label").textContent = view === "common" ? "×" : "→";
@@ -890,9 +908,14 @@ $("mutual").addEventListener("change", () => draw());
 $("minlen").addEventListener("change", () => draw());
 $("group").addEventListener("change", () => draw());
 $("rank").addEventListener("change", () => draw());
+$("size").addEventListener("change", () => draw());
 // Without the .rank sidecar there is nothing to choose; hide the control rather than
 // offer an option that silently falls back.
-if (info.pagerank === false) { $("rank").hidden = $("rankLabel").hidden = true; }
+if (info.pagerank === false) {
+  $("rank").hidden = $("rankLabel").hidden = true;
+  $("sizePagerank").hidden = $("sizePagerank").disabled = true;
+  if ($("size").value === "pagerank") $("size").value = "indegree";
+}
 // The server's default, so a URL without minlen and the dropdown agree.
 if (info.minLenDefault !== undefined && !location.hash.includes("minlen=")) {
   $("minlen").value = String(info.minLenDefault);

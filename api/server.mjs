@@ -115,8 +115,15 @@ const positionsOf = (ids, articleIds) => {
 /** `rank=pagerank` -> rank frontiers, search and the top list by PageRank instead of in-degree. */
 const rankBy = (q) => (q.get("rank") === "pagerank" && graph.rank ? "pagerank" : "indegree");
 
-/** `group=cluster` -> wedges from the link structure itself, not the topic filing. */
-const groupBy = (q) => (q.get("group") === "cluster" ? "cluster" : "topic");
+/** `group=cluster|hops` -> wedges from the link structure itself, or from hop distance, not the topic filing. */
+const groupBy = (q) => (["cluster", "hops"].includes(q.get("group")) ? q.get("group") : "topic");
+
+/** `size=indegree|pagerank|length` -> what a dot's radius reflects; the default is its degree on the disc. */
+const sizeBy = (q) => {
+  const v = q.get("size");
+  return v === "pagerank" ? (graph.rank ? "pagerank" : "indegree")
+       : ["indegree", "length"].includes(v) ? v : "degree";
+};
 
 /** `mutual=1` -> draw and follow only links that go both ways. */
 const wantMutual = (q) => ["1", "true", "yes"].includes(q.get("mutual") ?? "");
@@ -213,7 +220,7 @@ const server = createServer(async (req, res) => {
                     : direction === "out" ? `What ${name} links to`
                     : direction === "mutual" ? `${name} — mutual links` : name)
                     + (w.name ? ` · within ${w.name}` : "");
-        const data = graph.toVaultData(sel.ids, { title, depth: sel.depth, mutual, group: groupBy(q) });
+        const data = graph.toVaultData(sel.ids, { title, depth: sel.depth, mutual, group: groupBy(q), size: sizeBy(q) });
         // The article the disc is drawn around sits in the hub, as a path's steps do:
         // the one dot the view is about should never have to be found on the rim.
         data.pinned = positionsOf(sel.ids, [seed]);
@@ -250,7 +257,7 @@ const server = createServer(async (req, res) => {
         }
         const names = path.map((i) => graph.titleOf(i).replace(/_/g, " "));
         const data = graph.toVaultData(ids, {
-          mutual, group: groupBy(q),
+          mutual, group: groupBy(q), size: sizeBy(q),
           title: `${names[0]} → ${names[names.length - 1]} (${path.length - 1} hops)` +
                  (w.name ? ` · within ${w.name}` : ""),
           typeOf: (id) => path.includes(id) ? `step ${path.indexOf(id)} of ${path.length - 1}` : "along the path",
@@ -286,7 +293,7 @@ const server = createServer(async (req, res) => {
           });
         }
         const data = graph.toVaultData([a, b, ...sel.ids], {
-          mutual, group: groupBy(q),
+          mutual, group: groupBy(q), size: sizeBy(q),
           title: `${names[0]} × ${names[1]}` + (w.name ? ` · within ${w.name}` : ""),
           typeOf: (id) => id === a || id === b ? "the seed" : sel.role.get(id),
         });
@@ -310,7 +317,7 @@ const server = createServer(async (req, res) => {
           title: `Category: ${String(q.get("title")).replace(/_/g, " ")}`,
           wedgeOf: sel.branch,
           mutual: wantMutual(q),
-          group: groupBy(q),
+          group: groupBy(q), size: sizeBy(q),
         }));
       }
 
@@ -322,7 +329,7 @@ const server = createServer(async (req, res) => {
             title: `${WIKI} — ${rankBy(q) === "pagerank" ? "highest PageRank" : "most linked-to"}` +
                    (w.name ? ` within ${w.name}` : ""),
             mutual: wantMutual(q),
-            group: groupBy(q),
+            group: groupBy(q), size: sizeBy(q),
           }));
       }
 

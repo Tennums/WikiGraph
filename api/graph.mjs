@@ -599,11 +599,15 @@ export class WikiGraph {
    * @param {number[]} ids
    * @param {{ title: string, wedgeOf?: Map<number,number>, wedges?: number,
    *           depth?: Map<number,number>, typeOf?: (id: number) => string,
-   *           mutual?: boolean, group?: "topic" | "cluster" }} opts
+   *           mutual?: boolean, group?: "topic" | "cluster" | "hops",
+   *           size?: "degree" | "indegree" | "pagerank" | "length" }} opts
    */
   toVaultData(ids, opts) {
-    const { title, wedges = 12, depth, typeOf, mutual = false, group = "topic" } = opts;
-    let { wedgeOf } = opts;
+    const { title, wedges = 12, depth, typeOf, mutual = false, size = "degree" } = opts;
+    let { wedgeOf, group = "topic" } = opts;
+    // Hop wedges need the hops; a view that has none (path, category, top) falls
+    // back to the filing rather than drawing everything as one slice.
+    if (group === "hops" && !depth) group = "topic";
     const pos = new Map(ids.map((id, i) => [id, i]));
     const ph = ids.map(() => "?").join(",");
 
@@ -616,6 +620,9 @@ export class WikiGraph {
 
     const label = (t) => String(t).replace(/_/g, " ");
     const hopLabel = (h) => (h === 0 ? "the seed" : h === 1 ? "1 hop away" : `${h} hops away`);
+    // Wedge names for hops start with the number: the page orders wedges by name
+    // (numeric collation), and the seed belongs first, not after "2 hops away".
+    const hopWedge = (h) => (h === 0 ? "0 · the seed" : hopLabel(h));
 
     // Edges are the selection's induced subgraph: a link is drawn only when both ends
     // made the cut. Degree is recomputed over what is actually shown, because the disc
@@ -654,6 +661,15 @@ export class WikiGraph {
     // topic wedges are how the wiki files these articles; this is how they actually
     // hang together, and where the two disagree is the interesting part.
     let wedgeNames = null;
+    let pool = true;
+    // By hop distance the wedges are the shells of the neighbourhood: the seed, what it
+    // links to, what those link to. Never pooled -- the seed is a wedge of one, and
+    // three shells are the whole point, not a legend to trim.
+    if (group === "hops") {
+      wedgeOf = new Map(ids.map((id) => [id, depth.get(id) ?? 0]));
+      wedgeNames = new Map([...new Set(wedgeOf.values())].map((h) => [h, hopWedge(h)]));
+      pool = false;
+    }
     if (group === "cluster" && edges.length) {
       const comm = louvain(n, edges.map((e) => [e.s, e.t]), ids.map((i) => this.indeg[i]));
       wedgeOf = new Map(ids.map((id, i) => [id, comm[i]]));
@@ -691,8 +707,10 @@ export class WikiGraph {
       }
       // A wedge of one or two articles is a legend entry, not a slice of the disc:
       // below three members a group is pooled whatever its rank.
-      const keep = new Set([...freq.entries()].filter(([, c]) => c >= 3)
-        .sort((a, b) => b[1] - a[1]).slice(0, wedges).map(([w]) => w));
+      const keep = new Set(pool
+        ? [...freq.entries()].filter(([, c]) => c >= 3)
+            .sort((a, b) => b[1] - a[1]).slice(0, wedges).map(([w]) => w)
+        : freq.keys());
       const pooled = [...freq.keys()].filter((w) => !keep.has(w)).length;
       for (const [id, w] of wedgeOf) if (!keep.has(w)) wedgeOf.set(id, POOL);
       catName = wedgeNames ?? this._catNames([...keep]);
@@ -724,6 +742,25 @@ export class WikiGraph {
       return allow.has(t) ? label(t) : "(other topics)";
     };
 
+    // Dot size. The page sizes a dot by its degree on the disc, which is also what
+    // places it (hubs inward). Another signal goes along as `size`, 0..1, and the
+    // page uses it for the radius only, so the layout does not change under the
+    // reader's feet when they switch lenses. Log-scaled and normalised over the
+    // selection: in-degree runs from one to half a million, and on a linear scale
+    // every dot but United States would be the minimum.
+    let sizeOf = null;
+    if (size !== "degree" && n) {
+      const raw = size === "pagerank" && this.rank
+        ? (id) => this.rank[id] * this.n            // ~1 for an average article
+        : size === "length" ? (id) => Number(rows.get(id)?.len ?? 0)
+        : (id) => this.indeg[id];
+      const v = ids.map((id) => Math.log1p(Math.max(0, raw(id))));
+      let lo = Infinity, hi = -Infinity;
+      for (const x of v) { if (x < lo) lo = x; if (x > hi) hi = x; }
+      const span = hi - lo;
+      sizeOf = (i) => (span > 0 ? (v[i] - lo) / span : 0.5);
+    }
+
     const nodes = ids.map((id) => {
       const r = rows.get(id);
       const t = r ? String(r.touched) : "";
@@ -745,6 +782,7 @@ export class WikiGraph {
         touched: t ? `${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6, 8)}` : "",
         words: r ? Math.round(Number(r.len) / 6) : 0, // bytes -> rough word count
         deg: degOnDisc[pos.get(id)],
+        ...(sizeOf ? { size: Number(sizeOf(pos.get(id)).toFixed(3)) } : {}),
       };
     });
 

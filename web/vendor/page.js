@@ -548,7 +548,10 @@ function mountVaultGraph(root, data, deps) {
       folder: n.folder, sub: n.sub || "", dirs: n.dirs || [], ntype: n.type || "note",
       tags: n.tags || [], path: n.id, deg: n.deg,
       created: n.created || "", touched: n.touched || "",
-      words: n.words || 0, ghost: !!n.ghost
+      words: n.words || 0, ghost: !!n.ghost,
+      // wikigraph: an optional importance 0..1 that sets the radius instead of the
+      // degree. The degree still places the dot; only how big it is drawn changes.
+      imp: typeof n.size === "number" ? Math.max(0, Math.min(1, n.size)) : null
     });
   });
   // github#43
@@ -596,7 +599,9 @@ function mountVaultGraph(root, data, deps) {
 
   var NODE_MIN = 2.6, NODE_MAX = 11, NODE_ORPHAN = 6;
   graph.forEachNode(function (id, a) {
-    graph.setNodeAttribute(id, "size", a.deg === 0
+    graph.setNodeAttribute(id, "size", a.imp !== null
+      ? NODE_MIN + (NODE_MAX - NODE_MIN) * a.imp   // wikigraph: dots by importance
+      : a.deg === 0
       ? NODE_ORPHAN
       : Math.min(NODE_MAX, NODE_MIN + 1.55 * Math.sqrt(a.deg)));
   });
