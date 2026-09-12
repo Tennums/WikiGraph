@@ -65,8 +65,16 @@ hub that belongs. On simplewiki, hiding all four turns the most-linked-to list f
 `Geographic coordinate system, Wayback Machine, Population…` into `United States, France,
 Germany, City…`.
 
-A hidden kind is refused as a stepping stone in a path search but never as an endpoint:
-the endpoints are the user's choice.
+**Short articles can be hidden too** — *shorter than 1 KB* by default, which on simplewiki
+drops the bottom quarter (median 1.8 KB) and on enwiki rather less. Length is bytes of
+wikitext, already in the database and streamed into memory at startup; 1 KB is roughly 150
+words. The threshold is a view setting like the kinds, in the URL, and the server's default
+is reported by `/api/info` (`MIN_LEN_DEFAULT` in the environment to change it). Raising it
+does not shrink the disc — the budget goes to better-connected articles instead: *Around
+Physics* at 1,000 nodes has 9,844 links with no floor and 14,141 at 5 KB.
+
+A hidden kind or a short article is refused as a stepping stone in a path search but never
+as an endpoint or a seed: those are the user's choice.
 
 **Mutual links only** keeps a link only when it goes both ways. A one-way link is a
 mention — an infobox field, a passing reference; a mutual one means the two articles are

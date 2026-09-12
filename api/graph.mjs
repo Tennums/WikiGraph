@@ -134,6 +134,14 @@ export class WikiGraph {
       this.db.prepare("SELECT k, v FROM meta").all().map((r) => [r.k, r.v]),
     );
 
+    // Article length in bytes of wikitext, for the stub filter. Streamed out of the
+    // database at startup rather than kept in a sidecar: 7M rows take about three
+    // seconds on enwiki, once, and it spares the ingest yet another output.
+    this.len = new Int32Array(this.n);
+    for (const r of this.db.prepare("SELECT idx, len FROM node").iterate()) {
+      this.len[r.idx] = r.len;
+    }
+
     // Optional: the FTS5 title index. Without it search falls back to a case-sensitive
     // prefix LIKE, which is what it was, so an older build keeps working -- just worse.
     this.fts = null;
@@ -150,15 +158,17 @@ export class WikiGraph {
   }
 
   /**
-   * Build the "is this article allowed" test for a set of hidden kind names. Kept as a
-   * closure over a small typed array so the hot loops below pay one index and one
-   * compare per candidate, not a Set lookup on a string.
+   * Build the "is this article allowed" test for a set of hidden kind names and a
+   * minimum length. Kept as a closure over two typed arrays so the hot loops below
+   * pay two indexes and two compares per candidate, not a Set lookup on a string.
    */
-  allow(hide = []) {
+  allow(hide = [], minLen = 0) {
     const mask = new Uint8Array(KIND_NAMES.length);
     for (const name of hide) if (KIND[name] !== undefined) mask[KIND[name]] = 1;
-    const kind = this.kind;
-    return (idx) => mask[kind[idx]] === 0;
+    const kind = this.kind, len = this.len;
+    return minLen > 0
+      ? (idx) => mask[kind[idx]] === 0 && len[idx] >= minLen
+      : (idx) => mask[kind[idx]] === 0;
   }
 
   /** Out-neighbours; kept under the old name because toVaultData draws edges from it. */
@@ -198,8 +208,8 @@ export class WikiGraph {
    * finds Albert Einstein and "einstein" finds it too -- case-insensitive, diacritics
    * folded. Without it: the old prefix LIKE, fetched wide and re-ranked here.
    */
-  search(q, limit = 20, hide = []) {
-    const ok = this.allow(hide);
+  search(q, limit = 20, hide = [], minLen = 0) {
+    const ok = this.allow(hide, minLen);
     const text = String(q).trim();
     if (!text) return [];
 
@@ -257,8 +267,8 @@ export class WikiGraph {
    * `direction` is which links to follow: "out" (what this article cites), "in" (what
    * cites it -- "what links here"), "both", or "mutual" (only links that go both ways).
    */
-  neighborhood(seed, { hops = 2, limit = 3000, direction = "both", hide = [] } = {}) {
-    const ok = this.allow(hide);
+  neighborhood(seed, { hops = 2, limit = 3000, direction = "both", hide = [], minLen = 0 } = {}) {
+    const ok = this.allow(hide, minLen);
     const expand = (u) => {
       if (direction === "out") return [this.out.neighbours(u)];
       if (direction === "in") return [this.in.neighbours(u)];
@@ -294,11 +304,12 @@ export class WikiGraph {
    * target would read most of the graph; meeting in the middle keeps both frontiers
    * to a few thousand articles. Returns the path as node ids, or null.
    */
-  path(a, b, { maxDepth = 8, maxVisited = 4_000_000, hide = [], mutual = false } = {}) {
+  path(a, b, { maxDepth = 8, maxVisited = 4_000_000, hide = [], minLen = 0, mutual = false } = {}) {
     if (a === b) return [a];
-    // The endpoints are the user's choice and always allowed; a hidden kind is only
-    // refused as a stepping stone. Without this every path went through a list page.
-    const ok = this.allow(hide);
+    // The endpoints are the user's choice and always allowed; a hidden kind or a short
+    // article is only refused as a stepping stone. Without this every path went
+    // through a list page.
+    const ok = this.allow(hide, minLen);
     // A mutual-only path is a chain of articles that each refer back to the previous
     // one: rarer, longer, and much more meaningful than a chain of mentions.
     const step = mutual ? (u) => this.mutual(u) : null;
@@ -337,8 +348,8 @@ export class WikiGraph {
   }
 
   /** Every article filed under `catPid`, walking `depth` levels of subcategories. */
-  categorySubtree(catPid, { depth = 3, limit = 3000, hide = [] } = {}) {
-    const ok = this.allow(hide);
+  categorySubtree(catPid, { depth = 3, limit = 3000, hide = [], minLen = 0 } = {}) {
+    const ok = this.allow(hide, minLen);
     const kids = this.db.prepare("SELECT child FROM cat_tree WHERE parent = ?");
     const members = this.db.prepare("SELECT idx FROM node_cat WHERE cat = ?");
 
@@ -384,8 +395,8 @@ export class WikiGraph {
    * lets Float64Array.sort run without a comparator, which is what makes ordering
    * enwiki's 7M articles a sub-second startup cost rather than a 30-second one.
    */
-  top(limit = 3000, hide = []) {
-    const ok = this.allow(hide);
+  top(limit = 3000, hide = [], minLen = 0) {
+    const ok = this.allow(hide, minLen);
     if (!this._topOrder) {
       const key = new Float64Array(this.n);
       for (let i = 0; i < this.n; i++) key[i] = this.indeg[i] * 16777216 + i;

@@ -41,6 +41,7 @@ services:
       # The renderer re-plans its whole layout every animated frame; upstream measured
       # 10k nodes at 14 fps. Raising this past ~6000 trades the animation for size.
       MAX_NODES: ${MAX_NODES:-6000}
+      MIN_LEN_DEFAULT: ${MIN_LEN_DEFAULT:-1000}
     volumes:
       - ${DATA_DIR:-/media/vault/WikiGraph}/graph:/data/graph:ro
     networks:

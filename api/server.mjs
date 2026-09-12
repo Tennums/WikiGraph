@@ -77,6 +77,13 @@ const json = (res, code, body) => {
 /** Clamp to the budget the renderer can actually animate. */
 const budget = (v, dflt) => Math.max(1, Math.min(MAX_NODES, Number(v) || dflt));
 
+/** `minlen=1000` -> skip articles shorter than this many bytes of wikitext. */
+const MIN_LEN_DEFAULT = Number(process.env.MIN_LEN_DEFAULT ?? 1000);
+const minLen = (q) => {
+  const v = q.get("minlen");
+  return v === null ? MIN_LEN_DEFAULT : Math.max(0, Math.min(100_000, Number(v) || 0));
+};
+
 /** `mutual=1` -> draw and follow only links that go both ways. */
 const wantMutual = (q) => ["1", "true", "yes"].includes(q.get("mutual") ?? "");
 
@@ -129,6 +136,7 @@ const server = createServer(async (req, res) => {
           maxNodes: MAX_NODES,
           kinds: Object.fromEntries(KIND_NAMES.map((k, i) => [k, graph.kindCounts[i]])),
           search: graph.fts ? "fulltext" : "prefix",
+          minLenDefault: MIN_LEN_DEFAULT,
           // kiwix-serve exposes an article at /content/<book>/<Title>. The book name
           // is the ZIM's filename without its extension.
           reader: KIWIX_URL && KIWIX_BOOK ? `${KIWIX_URL}/content/${KIWIX_BOOK}` : null,
@@ -137,7 +145,7 @@ const server = createServer(async (req, res) => {
       case "/api/search":
         return json(res, 200, q.get("kind") === "category"
           ? graph.searchCategories(q.get("q") ?? "", budget(q.get("limit"), 20))
-          : graph.search(q.get("q") ?? "", budget(q.get("limit"), 20), hidden(q)));
+          : graph.search(q.get("q") ?? "", budget(q.get("limit"), 20), hidden(q), minLen(q)));
 
       /* Every view returns the same VAULT_DATA shape; only the selection differs. */
       case "/api/view/neighborhood": {
@@ -150,7 +158,7 @@ const server = createServer(async (req, res) => {
         // only ones followed; the flag wins.
         const direction = mutual ? "mutual"
           : ["in", "out", "both"].includes(q.get("direction")) ? q.get("direction") : "both";
-        const sel = graph.neighborhood(seed, { hops, limit, direction, hide: hidden(q) });
+        const sel = graph.neighborhood(seed, { hops, limit, direction, hide: hidden(q), minLen: minLen(q) });
         const name = graph.titleOf(seed).replace(/_/g, " ");
         const title = direction === "in" ? `What links to ${name}`
                     : direction === "out" ? `What ${name} links to`
@@ -167,9 +175,9 @@ const server = createServer(async (req, res) => {
         if (a < 0) return json(res, 404, { error: `no article "${q.get("from")}"` });
         if (b < 0) return json(res, 404, { error: `no article "${q.get("to")}"` });
         const t0 = Date.now();
-        const hide = hidden(q);
+        const hide = hidden(q), min = minLen(q);
         const mutual = wantMutual(q);
-        const path = graph.path(a, b, { hide, mutual });
+        const path = graph.path(a, b, { hide, minLen: min, mutual });
         if (!path) return json(res, 404, { error: "no link path found within 8 hops" });
         const limit = budget(q.get("limit"), 2500);
         const onPath = new Set(path);
@@ -178,7 +186,7 @@ const server = createServer(async (req, res) => {
         // the rest of it.
         const per = Math.max(20, Math.floor((limit - path.length) / path.length));
         for (const u of path) {
-          const near = graph.neighborhood(u, { hops: 1, limit: per + 1, hide,
+          const near = graph.neighborhood(u, { hops: 1, limit: per + 1, hide, minLen: min,
                                                direction: mutual ? "mutual" : "both" });
           for (const v of near.ids) if (!onPath.has(v) && ids.length < limit) { ids.push(v); onPath.add(v); }
         }
@@ -201,6 +209,7 @@ const server = createServer(async (req, res) => {
           depth: Math.max(1, Math.min(6, Number(q.get("depth")) || 3)),
           limit: budget(q.get("limit"), 3000),
           hide: hidden(q),
+          minLen: minLen(q),
         });
         if (!sel.ids.length) return json(res, 404, { error: "category holds no articles" });
         return json(res, 200, graph.toVaultData(sel.ids, {
@@ -211,7 +220,7 @@ const server = createServer(async (req, res) => {
       }
 
       case "/api/view/top":
-        return json(res, 200, graph.toVaultData(graph.top(budget(q.get("limit"), 2000), hidden(q)), {
+        return json(res, 200, graph.toVaultData(graph.top(budget(q.get("limit"), 2000), hidden(q), minLen(q)), {
           title: `${WIKI} — most linked-to`,
           mutual: wantMutual(q),
         }));

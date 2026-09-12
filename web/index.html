@@ -75,6 +75,15 @@
     <label><input type="checkbox" value="date" checked> dates</label>
     <label><input type="checkbox" value="dab" checked> disambiguation</label>
     <label><input type="checkbox" value="infra" checked> infobox links</label>
+    <label for="minlen" title="Skip articles shorter than this. Length is bytes of wikitext; 1 KB is roughly 150 words.">shorter than</label>
+    <select id="minlen">
+      <option value="0">any length</option>
+      <option value="500">500 B</option>
+      <option value="1000" selected>1 KB</option>
+      <option value="2000">2 KB</option>
+      <option value="5000">5 KB</option>
+      <option value="10000">10 KB</option>
+    </select>
   </span>
 
   <label id="mutualLabel" title="Draw and follow only links that go both ways. A one-way link is a mention; a mutual one means the two articles are about each other.">
@@ -113,7 +122,7 @@ const markup = await (await fetch("vendor/page.html")).text();
  * button. The hash rather than the query string: it never reaches the server, so a
  * shared link is just a link and the API stays cacheable by path.
  */
-const FIELDS = ["view", "q", "q2", "limit", "hops"];
+const FIELDS = ["view", "q", "q2", "limit", "hops", "minlen"];
 const hideBoxes = () => [...document.querySelectorAll("#hide input")];
 const hideValue = () => hideBoxes().filter((b) => b.checked).map((b) => b.value).join(",");
 
@@ -153,7 +162,8 @@ async function draw({ push = true } = {}) {
   writeHash(push);
 
   const t = encodeURIComponent(q);
-  const hide = `&hide=${hideValue()}` + ($("mutual").checked ? "&mutual=1" : "");
+  const hide = `&hide=${hideValue()}&minlen=${$("minlen").value}` +
+               ($("mutual").checked ? "&mutual=1" : "");
   const url = (
     view === "top" ? `api/view/top?limit=${limit}`
     : view === "category" ? `api/view/category?title=${t}&limit=${limit}&depth=3`
@@ -290,7 +300,7 @@ const typeahead = (el) => () => {
     const v = el.value.trim();
     if (v.length < 2) return;
     const kind = $("view").value === "category" ? "&kind=category" : "";
-    const hits = await (await fetch(`api/search?q=${encodeURIComponent(v)}&hide=${hideValue()}${kind}`)).json();
+    const hits = await (await fetch(`api/search?q=${encodeURIComponent(v)}&hide=${hideValue()}&minlen=${$("minlen").value}${kind}`)).json();
     $("hits").innerHTML = hits
       .map((h) => `<option value="${h.title.replace(/_/g, " ")}">`).join("");
   }, 180);
@@ -318,6 +328,11 @@ for (const b of hideBoxes()) {
   b.addEventListener("change", () => draw());
 }
 $("mutual").addEventListener("change", () => draw());
+$("minlen").addEventListener("change", () => draw());
+// The server's default, so a URL without minlen and the dropdown agree.
+if (info.minLenDefault !== undefined && !location.hash.includes("minlen=")) {
+  $("minlen").value = String(info.minLenDefault);
+}
 
 readHash();
 syncControls();
