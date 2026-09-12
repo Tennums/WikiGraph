@@ -71,6 +71,7 @@
   <select id="hops"><option>1</option><option selected>2</option><option>3</option></select>
 
   <button id="go">Draw</button>
+  <button id="random" title="A random well-linked article as the centre, respecting the filters. With 'Draw around this' on the card, an aimless walk.">&#127922; Surprise me</button>
 
   <label for="group" title="Topic: how the wiki files these articles. Cluster: how they actually hang together, by modularity on the links drawn — each wedge named after its three most linked-to members.">Wedges</label>
   <select id="group">
@@ -386,6 +387,16 @@ const syncControls = () => {
 };
 $("view").addEventListener("change", syncControls);
 $("go").addEventListener("click", draw);
+$("random").addEventListener("click", async () => {
+  const w = $("within").value.trim();
+  const r = await (await fetch(`api/random?hide=${hideValue()}&minlen=${$("minlen").value}` +
+                               (w ? `&within=${encodeURIComponent(w)}` : ""))).json();
+  if (r.error) { status(r.error, true); return; }
+  if (!["neighborhood", "in", "out"].includes($("view").value)) $("view").value = "neighborhood";
+  $("q").value = r.title;
+  syncControls();
+  draw();
+});
 for (const id of ["q", "q2", "within"]) {
   $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") draw(); });
 }

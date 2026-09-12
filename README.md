@@ -36,6 +36,11 @@ first real paragraph out of mwoffliner's HTML: past the hatnotes, past the infob
 per title for the session; a fetch is abandoned the moment the selection moves on. With no
 ZIM configured the card simply has no preview, as it has no read button.
 
+**Surprise me** picks a random article that passes the current filters and is linked to at
+least twenty times — a starting point with somewhere to go — and draws around it. With
+*Draw around this* on the card, that is an aimless walk through the wiki; the back button
+retraces it.
+
 Every view is a URL. The controls mirror into the hash —
 `#view=path&q=Cheese&q2=Black+hole&limit=1000` — so a view can be bookmarked or sent,
 and the browser's back button retraces a walk. The detail card's **Draw around this**

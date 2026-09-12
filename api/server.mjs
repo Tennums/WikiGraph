@@ -176,6 +176,14 @@ const server = createServer(async (req, res) => {
         return json(res, 200, graph.search(q.get("q") ?? "", budget(q.get("limit"), 20), hidden(q), minLen(q), w.mask, rankBy(q)));
       }
 
+      case "/api/random": {
+        const w = within(q);
+        if (w.error) return json(res, 404, { error: w.error });
+        const i = graph.random({ hide: hidden(q), minLen: minLen(q), within: w.mask });
+        if (i < 0) return json(res, 404, { error: "nothing passes the current filters" });
+        return json(res, 200, { idx: i, title: graph.titleOf(i).replace(/_/g, " "), indeg: graph.indeg[i] });
+      }
+
       /* Every view returns the same VAULT_DATA shape; only the selection differs. */
       case "/api/view/neighborhood": {
         const seed = graph.lookup(q.get("title") ?? "");

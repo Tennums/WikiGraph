@@ -223,7 +223,7 @@ RE_LIST = re.compile(
 RE_DATE = re.compile(
     r"^(\d{1,4}(_BC)?|\d{3,4}s|\d{1,2}(st|nd|rd|th)_(century|millennium)(_BC)?|"
     r"(January|February|March|April|May|June|July|August|September|October|November|"
-    r"December)_\d{1,2}|Deaths_in_\d{4}|\d{4}_in_.+)$")
+    r"December)_\d{1,2}|Deaths_in_(\w+_)?\d{4}|\d{4}_in_.+)$")
 RE_DAB_TITLE = re.compile(r"_\(disambiguation\)$")
 # Categories that organise rather than describe -- stub bins, "X by country" containers,
 # template and list holders, project bookkeeping. Walked through, never used as a

@@ -459,6 +459,30 @@ export class WikiGraph {
     return { ids, role, cited: cited.length, citing: citing.length };
   }
 
+  /**
+   * A random article that passes the filters and is linked to at least `minIn`
+   * times -- a starting point with somewhere to go, not an orphan.
+   *
+   * Rejection sampling first: with the default filters most articles qualify, so a
+   * few draws suffice. If they do not -- a tiny `within` category, say -- fall back
+   * to one scan collecting every candidate and pick from those; a scan over enwiki
+   * is ~50 ms, which is fine for a button but not for the common case.
+   */
+  random({ hide = [], minLen = 0, within = null, minIn = 20 } = {}) {
+    const ok = this.allow(hide, minLen, within);
+    const fits = (i) => ok(i) && this.indeg[i] >= minIn;
+    for (let tries = 0; tries < 2000; tries++) {
+      const i = Math.floor(Math.random() * this.n);
+      if (fits(i)) return i;
+    }
+    const pool = [];
+    for (let i = 0; i < this.n; i++) if (fits(i)) pool.push(i);
+    if (pool.length) return pool[Math.floor(Math.random() * pool.length)];
+    // A category the user narrowed to may hold nothing that well-linked; better a
+    // quiet article from it than nothing at all.
+    return minIn > 0 ? this.random({ hide, minLen, within, minIn: 0 }) : -1;
+  }
+
   /** Every article filed under `catPid`, walking `depth` levels of subcategories. */
   categorySubtree(catPid, { depth = 3, limit = 3000, hide = [], minLen = 0 } = {}) {
     const ok = this.allow(hide, minLen);
