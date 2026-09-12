@@ -94,6 +94,22 @@ the last few masks are cached, since a walk over a big category is the expensive
 the request. Seeds and path endpoints are exempt as always. The category view itself does
 not offer it — it already is one.
 
+**Wedges by cluster instead of topic.** The topic wedges are how the wiki *files* these
+articles; a *Wedges: by cluster* switch replaces them with how the articles actually hang
+together — communities found by the Louvain method on the links drawn, each named after
+its three most linked-to members. On *Around Physics* that separates the Nobel physicists,
+thermodynamics (*Refrigerator, Air conditioner, Viscosity*) and the Greek letters physics
+borrows, which the topic view files together under Science; *Around Belgium* falls into
+football, Formula One, Flanders, Liège, Antwerp, Leuven. Where the two views disagree is
+usually the most interesting thing the graph has to say.
+
+Label propagation was tried first and does not work here: a neighbourhood is a few hubs
+and everything they touch, and a hub's label simply floods it — 1,453 of 1,500 nodes in one
+community. Modularity asks whether nodes are more connected than their degrees predict,
+which a hub cannot win by size alone. The implementation (`api/cluster.mjs`) is
+dependency-free, deterministic — same view, same partition, every time — and takes 20–40
+ms on a 1,500-node disc.
+
 **Search is a title index**, FTS5 in its own sidecar `<wiki>.search.db`: each word typed
 becomes a prefix term, case-insensitive with diacritics folded, ranked by in-degree. So
 "einstein" finds *Albert Einstein* first, "alb ein" finds it too, and "zurich" finds

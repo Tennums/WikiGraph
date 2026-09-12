@@ -98,6 +98,9 @@ const within = (q) => {
   return { mask: graph.categoryMask(pid, depth), name: name.replace(/_/g, " ") };
 };
 
+/** `group=cluster` -> wedges from the link structure itself, not the topic filing. */
+const groupBy = (q) => (q.get("group") === "cluster" ? "cluster" : "topic");
+
 /** `mutual=1` -> draw and follow only links that go both ways. */
 const wantMutual = (q) => ["1", "true", "yes"].includes(q.get("mutual") ?? "");
 
@@ -184,7 +187,7 @@ const server = createServer(async (req, res) => {
                     : direction === "out" ? `What ${name} links to`
                     : direction === "mutual" ? `${name} — mutual links` : name)
                     + (w.name ? ` · within ${w.name}` : "");
-        const data = graph.toVaultData(sel.ids, { title, depth: sel.depth, mutual });
+        const data = graph.toVaultData(sel.ids, { title, depth: sel.depth, mutual, group: groupBy(q) });
         if (w.mask) data.within = { name: w.name, articles: w.mask.count, categories: w.mask.categories };
         return json(res, 200, data);
       }
@@ -217,7 +220,7 @@ const server = createServer(async (req, res) => {
         }
         const names = path.map((i) => graph.titleOf(i).replace(/_/g, " "));
         const data = graph.toVaultData(ids, {
-          mutual,
+          mutual, group: groupBy(q),
           title: `${names[0]} → ${names[names.length - 1]} (${path.length - 1} hops)` +
                  (w.name ? ` · within ${w.name}` : ""),
           typeOf: (id) => path.includes(id) ? `step ${path.indexOf(id)} of ${path.length - 1}` : "along the path",
@@ -252,7 +255,7 @@ const server = createServer(async (req, res) => {
           });
         }
         const data = graph.toVaultData([a, b, ...sel.ids], {
-          mutual,
+          mutual, group: groupBy(q),
           title: `${names[0]} × ${names[1]}` + (w.name ? ` · within ${w.name}` : ""),
           typeOf: (id) => id === a || id === b ? "the seed" : sel.role.get(id),
         });
@@ -275,6 +278,7 @@ const server = createServer(async (req, res) => {
           title: `Category: ${String(q.get("title")).replace(/_/g, " ")}`,
           wedgeOf: sel.branch,
           mutual: wantMutual(q),
+          group: groupBy(q),
         }));
       }
 
@@ -285,6 +289,7 @@ const server = createServer(async (req, res) => {
           graph.top(budget(q.get("limit"), 2000), hidden(q), minLen(q), w.mask), {
             title: `${WIKI} — most linked-to` + (w.name ? ` within ${w.name}` : ""),
             mutual: wantMutual(q),
+            group: groupBy(q),
           }));
       }
 

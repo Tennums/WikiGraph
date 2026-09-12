@@ -16,6 +16,7 @@
 
 import { openSync, readSync, statSync, closeSync, existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { louvain } from "./cluster.mjs";
 
 const MAGIC = 0x57474b31; // "WGK1"
 const HEADER = 32; // 4 x int64
@@ -518,10 +519,11 @@ export class WikiGraph {
    * @param {number[]} ids
    * @param {{ title: string, wedgeOf?: Map<number,number>, wedges?: number,
    *           depth?: Map<number,number>, typeOf?: (id: number) => string,
-   *           mutual?: boolean }} opts
+   *           mutual?: boolean, group?: "topic" | "cluster" }} opts
    */
   toVaultData(ids, opts) {
-    const { title, wedgeOf, wedges = 12, depth, typeOf, mutual = false } = opts;
+    const { title, wedges = 12, depth, typeOf, mutual = false, group = "topic" } = opts;
+    let { wedgeOf } = opts;
     const pos = new Map(ids.map((id, i) => [id, i]));
     const ph = ids.map(() => "?").join(",");
 
@@ -534,6 +536,59 @@ export class WikiGraph {
 
     const label = (t) => String(t).replace(/_/g, " ");
     const hopLabel = (h) => (h === 0 ? "the seed" : h === 1 ? "1 hop away" : `${h} hops away`);
+
+    // Edges are the selection's induced subgraph: a link is drawn only when both ends
+    // made the cut. Degree is recomputed over what is actually shown, because the disc
+    // rings notes by the degree it can see -- a global degree would push articles to
+    // the centre for links to nodes that are not on screen.
+    // With `mutual` an edge is drawn only if it exists in both directions. The first
+    // pass collects every directed link inside the selection; the second keeps a pair
+    // when its reverse was also seen. Keyed on the selection positions, which are
+    // small, rather than on node ids.
+    const n = ids.length;
+    const edges = [];
+    const degOnDisc = new Int32Array(n);
+    const addEdge = (from, to) => { edges.push({ s: from, t: to, w: 1 }); degOnDisc[from]++; degOnDisc[to]++; };
+    const seen = mutual ? new Set() : null;
+    for (const id of ids) {
+      const from = pos.get(id);
+      for (const v of this.neighbours(id)) {
+        const to = pos.get(v);
+        if (to === undefined || to === from) continue;
+        if (mutual) { seen.add(from * n + to); continue; }
+        if (to < from) continue; // undirected, once
+        addEdge(from, to);
+      }
+    }
+    if (mutual) {
+      for (const key of seen) {
+        const from = Math.floor(key / n), to = key % n;
+        if (to < from || !seen.has(to * n + from)) continue;
+        addEdge(from, to);
+      }
+    }
+
+    // Clustering replaces the grouping with the link structure's own: communities
+    // found by modularity on the drawn edges, each named after its three most
+    // linked-to members so a wedge reads as a subject rather than a number. The
+    // topic wedges are how the wiki files these articles; this is how they actually
+    // hang together, and where the two disagree is the interesting part.
+    let wedgeNames = null;
+    if (group === "cluster" && edges.length) {
+      const comm = louvain(n, edges.map((e) => [e.s, e.t]), ids.map((i) => this.indeg[i]));
+      wedgeOf = new Map(ids.map((id, i) => [id, comm[i]]));
+      const members = new Map();
+      ids.forEach((id, i) => {
+        if (!members.has(comm[i])) members.set(comm[i], []);
+        members.get(comm[i]).push(id);
+      });
+      wedgeNames = new Map();
+      for (const [c, ms] of members) {
+        const top = ms.sort((a, b) => this.indeg[b] - this.indeg[a]).slice(0, 3)
+          .map((id) => label(this.titleOf(id)));
+        wedgeNames.set(c, top.join(", "));
+      }
+    }
 
     // Wedges. The category view knows its own grouping and passes it in; every other
     // view uses the topic assigned at build time.
@@ -554,12 +609,15 @@ export class WikiGraph {
         const w = wedgeOf.get(id);
         if (w !== undefined) freq.set(w, (freq.get(w) ?? 0) + 1);
       }
-      const keep = new Set([...freq.entries()].sort((a, b) => b[1] - a[1])
-        .slice(0, wedges).map(([w]) => w));
+      // A wedge of one or two articles is a legend entry, not a slice of the disc:
+      // below three members a group is pooled whatever its rank.
+      const keep = new Set([...freq.entries()].filter(([, c]) => c >= 3)
+        .sort((a, b) => b[1] - a[1]).slice(0, wedges).map(([w]) => w));
       const pooled = [...freq.keys()].filter((w) => !keep.has(w)).length;
       for (const [id, w] of wedgeOf) if (!keep.has(w)) wedgeOf.set(id, POOL);
-      catName = this._catNames([...keep]);
-      if (pooled) catName.set(POOL, `(${pooled} smaller subcategories)`);
+      catName = wedgeNames ?? this._catNames([...keep]);
+      if (pooled) catName.set(POOL, wedgeNames ? `(${pooled} smaller clusters)`
+                                               : `(${pooled} smaller subcategories)`);
     }
 
     // A wedge per article is only useful while there are few enough to read. Past that
@@ -578,7 +636,8 @@ export class WikiGraph {
     const folderFor = (id) => {
       if (wedgeOf) {
         const c = wedgeOf.get(id);
-        return c === undefined ? "(uncategorised)" : label(catName.get(c) ?? "?");
+        return c === undefined ? (wedgeNames ? "(unlinked)" : "(uncategorised)")
+                               : wedgeNames ? String(catName.get(c) ?? "?") : label(catName.get(c) ?? "?");
       }
       const t = rows.get(id)?.topic;
       if (!t) return "(uncategorised)";
@@ -605,42 +664,9 @@ export class WikiGraph {
         created: t ? `${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6, 8)}` : "",
         touched: t ? `${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6, 8)}` : "",
         words: r ? Math.round(Number(r.len) / 6) : 0, // bytes -> rough word count
-        deg: 0,
+        deg: degOnDisc[pos.get(id)],
       };
     });
-
-    // Edges are the selection's induced subgraph: a link is drawn only when both ends
-    // made the cut. Degree is recomputed over what is actually shown, because the disc
-    // rings notes by the degree it can see -- a global degree would push articles to
-    // the centre for links to nodes that are not on screen.
-    // With `mutual` an edge is drawn only if it exists in both directions. The first
-    // pass collects every directed link inside the selection; the second keeps a pair
-    // when its reverse was also seen. Keyed on the selection positions, which are
-    // small, rather than on node ids.
-    const edges = [];
-    const seen = mutual ? new Set() : null;
-    const n = ids.length;
-    for (const id of ids) {
-      const from = pos.get(id);
-      for (const v of this.neighbours(id)) {
-        const to = pos.get(v);
-        if (to === undefined || to === from) continue;
-        if (mutual) { seen.add(from * n + to); continue; }
-        if (to < from) continue; // undirected, once
-        edges.push({ s: from, t: to, w: 1 });
-        nodes[from].deg++;
-        nodes[to].deg++;
-      }
-    }
-    if (mutual) {
-      for (const key of seen) {
-        const from = Math.floor(key / n), to = key % n;
-        if (to < from || !seen.has(to * n + from)) continue;
-        edges.push({ s: from, t: to, w: 1 });
-        nodes[from].deg++;
-        nodes[to].deg++;
-      }
-    }
 
     return {
       vault: title,
