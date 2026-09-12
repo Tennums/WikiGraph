@@ -6,6 +6,7 @@
 #   cp .env.example .env      # then set WIKI / ZIM_BOOK / KIWIX_URL
 #   docker compose --profile ingest run --rm ingest   # one-off, hours for enwiki
 #   docker compose up -d
+#   ./refresh.sh              # monthly: new dumps, new build beside the old, swap
 #
 # Ingress is Caddy's, over the shared external `proxy` network, on one hostname:
 #
@@ -31,6 +32,8 @@ services:
     # ports: ["${API_PORT:-3000}:3000"]
     environment:
       WIKI: ${WIKI:-simplewiki}
+      # Either a flat build (enwiki.csr beside enwiki.db) or, once refresh.sh has run,
+      # dated builds with a `current` link -- the API takes `current` when it is there.
       GRAPH_DIR: /data/graph
       WEB_DIR: /web
       # Where the *browser* reaches Kiwix — the hostname and prefix, since the link is

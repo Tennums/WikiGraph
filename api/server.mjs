@@ -7,14 +7,26 @@
  */
 
 import { createServer, request as httpRequest } from "node:http";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { extname, join, normalize } from "node:path";
+import { basename, extname, join, normalize } from "node:path";
 import { WikiGraph, KIND_NAMES } from "./graph.mjs";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const WIKI = process.env.WIKI ?? "simplewiki";
-const GRAPH_DIR = process.env.GRAPH_DIR ?? "data/graph";
+// A graph directory holds either one build flat (`enwiki.csr` and friends) or dated
+// builds beside a `current` link to the one in use -- the layout the monthly refresh
+// makes (`refresh.sh`), so a new build can be made and compared while the old one
+// serves, then swapped in with one restart. `current` wins when it is there; a flat
+// build beside it is the one the refresh superseded and can be deleted.
+const GRAPH_ROOT = process.env.GRAPH_DIR ?? "data/graph";
+const GRAPH_DIR = (() => {
+  const cur = join(GRAPH_ROOT, "current");
+  try { return statSync(cur).isDirectory() ? cur : GRAPH_ROOT; } catch { return GRAPH_ROOT; }
+})();
+// The build's own name, for /api/info: the dated directory `current` points at, or
+// nothing for a flat layout.
+const BUILD = GRAPH_DIR === GRAPH_ROOT ? null : basename(realpathSync(GRAPH_DIR));
 const WEB_DIR = process.env.WEB_DIR ?? "web";
 // Where a click on a dot sends the reader. Empty disables the link entirely, which is
 // the right default until a ZIM is actually mounted.
@@ -64,7 +76,8 @@ if (!graph.fts) {
               `  docker compose --profile ingest run --rm ingest --wiki ${WIKI} --index-only`);
 }
 console.log(`wikigraph: ${WIKI} — ${graph.n.toLocaleString()} articles, ` +
-            `${graph.m.toLocaleString()} links`);
+            `${graph.m.toLocaleString()} links` + (BUILD ? ` (build ${BUILD})` : "") +
+            ` from ${GRAPH_DIR}`);
 
 const MIME = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -174,6 +187,7 @@ const server = createServer(async (req, res) => {
       case "/api/info":
         return json(res, 200, {
           ...graph.meta,
+          build: BUILD,
           maxNodes: MAX_NODES,
           kinds: Object.fromEntries(KIND_NAMES.map((k, i) => [k, graph.kindCounts[i]])),
           search: graph.fts ? "fulltext" : "prefix",

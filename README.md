@@ -273,9 +273,16 @@ All state lives on the NAS under `DATA_DIR`; the containers hold nothing of thei
 ```
 /media/vault/WikiGraph/
 ├── dumps/     enwiki-latest-*.sql.gz     (input, mounted read-only)
+│   └── 20260901/  enwiki-20260901-*.sql.gz   (a dated set, from refresh.sh)
 ├── graph/     enwiki.{csr,rcsr,db,kind,rank,search.db,redirects.tsv.gz}
+│   ├── 20260901/  the same seven files, one build      (from refresh.sh)
+│   └── current -> 20260901                             (the build the API serves)
 └── zim/       <ZIM_BOOK>.zim              (Kiwix)
 ```
+
+A first build sits flat in `graph/`; the monthly refresh below makes dated builds beside a
+`current` link. The API prefers `current` when it exists, so the two layouts need no
+migration step — the flat files just stop being read, and can be deleted.
 
 ```bash
 cp .env.example .env          # set WIKI, ZIM_BOOK, KIWIX_URL
@@ -313,10 +320,48 @@ unrecognised flag in a usage message is the tell: the container is running older
 than the working tree.
 
 If you still need the dumps, `./fetch-dumps.sh enwiki /media/vault/WikiGraph/dumps`
-fetches all six. It downloads **sequentially on purpose** — `dumps.wikimedia.org` answers
+fetches all six (a third argument, `20260901`, takes that run's files instead of `latest`). It downloads **sequentially on purpose** — `dumps.wikimedia.org` answers
 parallel requests from one address with 429, and a 429 lands as a 169-byte HTML error page
 wearing a `.sql.gz` name, which then fails deep inside the parser instead of at the
 download. Each file is verified with `gzip -t` before it counts as fetched.
+
+### Monthly refresh
+
+Wikimedia publishes new dumps twice a month. One command takes a run to a running API:
+
+```bash
+./refresh.sh              # the newest run whose six tables are all published
+./refresh.sh 20260901     # that run
+./refresh.sh 20260901 --no-swap   # fetch, build and report; keep serving the old build
+```
+
+Four steps, each skipped when its output already exists, so a run that died two hours
+into the enwiki build is resumed by repeating the command: **fetch** the six dumps into
+`dumps/<date>/`; **build** into `graph/<date>/` (the ingest container, local scratch as
+always, `build.log` beside the result); **compare** with the build in use; **swap**
+`graph/current` to the new build and restart the API, waiting for its health check.
+
+The comparison — `ingest/compare.py`, also on its own — is printed and saved as
+`graph/<date>/<wiki>.changes.txt`: article and link counts by kind, the top 40 by
+in-degree with their movement (`^ was #7`, `new`), the biggest gains and losses in
+in-degree, and the most linked-to titles that arrived and left. Articles are matched by
+title, since the CSR index is a build's own numbering; a rename is therefore one departure
+and one arrival, which is the truth of it as far as links go. Between simplewiki's August
+and September runs: +807 articles, +30,617 links; *Twitter* (1,535 in-links) left and *X
+(social platform)* (1,543) arrived; *Palestine (country)* was folded into *Palestine*, the
+month's biggest gain; the ice-hockey season started, and the summer transfer window shows
+as a column of footballers losing their links.
+
+The swap is a relative symlink written beside the old one and renamed over it, so a
+reader sees either build, never none; relative, so it resolves identically on the host and
+inside the container. A share that refuses symlinks gets directory renames instead, with
+the previous build getting its date back from its `BUILD` marker. The API opens its files
+once at startup, so the restart is what switches — `restart: unless-stopped` brings it back
+in a few seconds, and the script prints what it is serving once healthy.
+
+Old builds are kept until deleted by hand; a simplewiki build is 250 MB, an enwiki one
+about 8 GB. The ZIM is on its own cadence (Kiwix publishes every few months) and stays
+manual: `fetch-zim.sh`, then `ZIM_BOOK` in `.env`.
 
 ### Behind Caddy
 
