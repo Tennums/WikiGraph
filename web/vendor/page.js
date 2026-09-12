@@ -5064,6 +5064,17 @@ function mountVaultGraph(root, data, deps) {
     d.querySelector(".pin").onclick = function () { togglePin(id); select(id); };
     var rc = d.querySelector(".recenter");
     if (rc) rc.onclick = function () { deps.onRecenter(a.label); };
+    // The host may want the open button to do something other than follow its href --
+    // show the article beside the disc, say. The href stays for middle-click and for
+    // "open in new tab"; a plain click goes to the host.
+    var oa = d.querySelector("a.open");
+    if (oa && typeof deps.onOpen === "function") {
+      oa.onclick = function (ev) {
+        if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button !== 0) return;
+        ev.preventDefault();
+        deps.onOpen(a.label, openHref);
+      };
+    }
     var pv = d.querySelector(".preview");
     if (pv) deps.articlePreview(a.label, pv);
     Array.prototype.forEach.call(d.querySelectorAll("[data-go]"), /** @param {HTMLElement} b */ function (b) {

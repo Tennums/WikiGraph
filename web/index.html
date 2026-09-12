@@ -53,8 +53,31 @@
   #gameResult { color: #e8e8ea; }
   #game button { padding: 2px 8px; }
   #gameClose { margin-left: auto; }
-  #mount { flex: 1; min-height: 0; position: relative; }
+  #main { flex: 1; min-height: 0; display: flex; position: relative; }
+  #mount { flex: 1; min-width: 0; position: relative; }
   #mount > .vault-graph { height: 100%; }
+
+  /* The article beside the disc. Width is the reader's, in a CSS variable the divider
+     drags; the disc takes the rest and re-fits itself (upstream watches its own box). */
+  #reader { width: var(--reader-w, 44%); min-width: 320px; max-width: 75%; z-index: 10;
+            display: flex; flex-direction: column; background: #fff; border-left: 1px solid #2c313a; }
+  #reader[hidden], #divider[hidden] { display: none; }
+  #divider { width: 6px; cursor: col-resize; background: #1b1e24; flex: none; }
+  #divider:hover, #divider.dragging { background: #3987e5; }
+  #readerBar { display: flex; gap: 8px; align-items: center; padding: 6px 10px;
+               background: #1b1e24; border-bottom: 1px solid #2c313a; color: #e8e8ea; }
+  #readerTitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                 white-space: nowrap; font-weight: 600; }
+  #readerBar button, #readerBar a { padding: 2px 8px; font: inherit; color: #e8e8ea;
+                                    background: #23272f; border: 1px solid #333944;
+                                    border-radius: 5px; text-decoration: none; cursor: pointer; }
+  #readerFrame { flex: 1; border: 0; width: 100%; background: #fff; }
+  /* Too narrow for two columns: the reader floats over the disc instead of crushing it. */
+  @media (max-width: 900px) {
+    #reader { position: absolute; right: 0; top: 0; bottom: 0; width: 88%; max-width: none;
+              box-shadow: -8px 0 24px rgba(0,0,0,.5); }
+    #divider { display: none !important; }
+  }
 </style>
 </head>
 <body>
@@ -141,7 +164,20 @@
   <button id="gameClose" title="Close the game" aria-label="Close the game">&times;</button>
 </div>
 
-<div id="mount"></div>
+<div id="main">
+  <div id="mount"></div>
+  <div id="divider" hidden title="Drag to resize"></div>
+  <aside id="reader" hidden>
+    <div id="readerBar">
+      <button id="readerBack" title="Back, within the article panel">&#8592;</button>
+      <span id="readerTitle"></span>
+      <button id="readerRecenter" title="Redraw the disc around the article being read">&#8982; Draw around this</button>
+      <a id="readerExternal" target="_blank" rel="noopener" title="Open in a new tab">&#8599;</a>
+      <button id="readerClose" title="Close the article panel">&times;</button>
+    </div>
+    <iframe id="readerFrame" title="Article"></iframe>
+  </aside>
+</div>
 
 <script src="vendor/engine.js"></script>
 <script type="module">
@@ -274,6 +310,9 @@ async function draw({ push = true, fromGame = false } = {}) {
     // configured) makes the page omit the button rather than draw a dead one.
     articleHref: (label) =>
       info.reader ? `${info.reader}/${encodeURIComponent(label.replace(/ /g, "_"))}` : "",
+    // A plain click on that button opens the article beside the disc; the href still
+    // works for middle-click and the ↗ in the panel, so a new tab remains one gesture away.
+    onOpen: (label, href) => reader.show(href, label),
     // What the view is about sits in the hub -- upstream's own "pin to hub" feature:
     // the seed of a neighbourhood, the chain of a path, both seeds of common ground.
     pinned: data.pinned ?? [],
@@ -313,6 +352,111 @@ async function draw({ push = true, fromGame = false } = {}) {
          (data.common ? `both link to ${data.common.cited}, ${data.common.citing} link to both · ` : "") +
          `${data.nodes.length.toLocaleString()} articles · ` +
          `${data.edges.length.toLocaleString()} links · ${queried}ms query · ${drawn}ms draw`);
+}
+
+/**
+ * The reader: the article beside the disc, in an iframe on the same origin (Kiwix is
+ * behind the same hostname), so the frame is ours to read -- its current URL gives
+ * the title, and links inside it are plain relative hrefs that navigate the frame on
+ * their own. The panel follows what you open; it is not part of the URL, since the
+ * view is the URL and the article is what you happen to be reading.
+ */
+const reader = {
+  el: $("reader"), frame: $("readerFrame"), open: false,
+  // Its own back-stack. An iframe shares the joint session history with the window,
+  // so a link click in the article and a recenter of the disc land in one list, and
+  // "back" in the panel would undo whichever came last -- the disc, as it turned out.
+  // Every navigation in the frame goes through location.replace(), which adds no
+  // history entry, and the panel remembers where it has been itself. Browser back
+  // is then the disc's history only; the panel's ← is the panel's only.
+  stack: [],
+  go(url) {
+    const win = this.frame.contentWindow;
+    if (win && win.location.href !== "about:blank") win.location.replace(url);
+    else this.frame.src = url;
+  },
+  titleOf(url) {
+    // /kiwix/content/<book>/<Title> -> Title, underscores to spaces.
+    try { return decodeURIComponent(new URL(url).pathname.split("/").pop()).replace(/_/g, " "); }
+    catch { return ""; }
+  },
+  show(href, label) {
+    if (!info.reader) return;
+    this.open = true;
+    this.el.hidden = $("divider").hidden = false;
+    $("readerTitle").textContent = label;
+    $("readerExternal").href = href;
+    const cur = this.frame.contentWindow?.location?.href;
+    if (cur && cur !== "about:blank" && cur !== href) this.stack.push(cur);
+    if (cur !== href) this.go(href);
+  },
+  back() {
+    const prev = this.stack.pop();
+    if (prev) this.go(prev);
+  },
+  close() {
+    this.open = false;
+    this.el.hidden = $("divider").hidden = true;
+  },
+  current() { return this.titleOf(this.frame.contentWindow?.location?.href ?? this.frame.src); },
+};
+
+// Every navigation inside the frame -- a link click, back -- lands here.
+reader.frame.addEventListener("load", () => {
+  const url = reader.frame.contentWindow?.location?.href;
+  if (!url) return;
+  const title = reader.titleOf(url);
+  if (title) $("readerTitle").textContent = title;
+  $("readerExternal").href = url;
+  // Links off the wiki (mwoffliner keeps a "view on wikipedia.org" link, and citations)
+  // leave the panel for a tab rather than steering the frame onto the internet.
+  try {
+    reader.frame.contentDocument.addEventListener("click", (ev) => {
+      const a = ev.target.closest?.("a[href]");
+      if (!a || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button !== 0) return;
+      const target = new URL(a.getAttribute("href"), url);
+      if (target.origin !== location.origin) {
+        ev.preventDefault(); window.open(target.href, "_blank", "noopener"); return;
+      }
+      if (target.hash && target.pathname === new URL(url).pathname) return;   // in-page anchor
+      ev.preventDefault();
+      reader.stack.push(url);
+      reader.go(target.href);
+    });
+  } catch {}
+  $("readerBack").disabled = reader.stack.length === 0;
+});
+$("readerClose").addEventListener("click", () => reader.close());
+$("readerBack").addEventListener("click", () => reader.back());
+$("readerRecenter").addEventListener("click", () => {
+  const t = reader.current();
+  if (!t) return;
+  $("view").value = "neighborhood";
+  $("q").value = t;
+  syncControls();
+  gameStep(t);
+  draw({ fromGame: !!game });
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && reader.open) reader.close(); });
+
+// The divider: drag to set the reader's width, remembered per browser.
+{
+  const div = $("divider");
+  let dragging = false;
+  div.addEventListener("pointerdown", (e) => { dragging = true; div.classList.add("dragging"); div.setPointerCapture(e.pointerId); });
+  div.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const w = Math.max(320, Math.min(window.innerWidth * 0.75, window.innerWidth - e.clientX));
+    document.documentElement.style.setProperty("--reader-w", w + "px");
+  });
+  div.addEventListener("pointerup", () => {
+    dragging = false; div.classList.remove("dragging");
+    try { localStorage.setItem("wikigraph:reader-w", document.documentElement.style.getPropertyValue("--reader-w")); } catch {}
+  });
+  try {
+    const w = localStorage.getItem("wikigraph:reader-w");
+    if (w) document.documentElement.style.setProperty("--reader-w", w);
+  } catch {}
 }
 
 /**

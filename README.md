@@ -30,6 +30,16 @@ thousand articles chosen for a reason:
 | **Category tree** | everything under a category, N levels deep | direct subcategories |
 | **Most linked-to** | the top articles by in-degree | subject area |
 
+**Read the article beside the disc.** The card's *Read the article* opens a panel on the
+right — an iframe onto Kiwix, same origin, so the frame is ours to read — with the disc
+still live on the left. Links inside the article navigate the panel; *Draw around this* in
+the panel's bar recenters the disc on what you are reading; ← is the panel's own history.
+The two histories are kept apart on purpose: an iframe shares the window's session history,
+so a naive "back" in the panel undid the last disc move instead. Every navigation in the
+frame uses `location.replace()` and the panel keeps its own stack, so the browser's back
+button is the disc's alone. The divider drags; the width is remembered. Under 900px the
+panel overlays rather than squeezes. Middle-click or ↗ still opens a tab.
+
 **The detail card shows the article's first paragraph.** Kiwix sits behind the same
 hostname, so the page fetches the article itself — same origin, no proxy — and takes the
 first real paragraph out of mwoffliner's HTML: past the hatnotes, past the infobox. Cached

@@ -9,8 +9,9 @@ It is no longer verbatim. The user-facing vocabulary has been changed from Obsid
 (vault, note, folder) to Wikipedia's (wiki, article, topic), and the detail card gained
 three host callbacks: `deps.articleHref(label)` supplies the open button's target instead
 of a hardcoded `obsidian://` URL, `deps.onRecenter(label)` adds a "Draw around this"
-button when present, and `deps.articlePreview(label, el)` is handed an empty element in
-the card to fill (here, the article's first paragraph). `page.css` gained the `.preview`
+button when present, `deps.articlePreview(label, el)` is handed an empty element in
+the card to fill (here, the article's first paragraph), and `deps.onOpen(label, href)`
+receives a plain click on the open button (modifier-clicks still follow the href). `page.css` gained the `.preview`
 rules beside the card's other styles. The sidebar gained *Export CSV* / *Export JSON* beside *Save PNG*, exporting what the
 disc shows by the planner's own `willShow()` test. Layout, rendering and interaction are
 untouched.
