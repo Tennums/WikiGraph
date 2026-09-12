@@ -118,6 +118,13 @@ way round, a neighbour clicked on the card scrolls the article to the sentence w
 link is made and flashes it. The marks are recomputed on every draw, since they are the
 intersection of the two: redraw around Physics and *Belgium* has 34 left.
 
+**The disc as a table.** *Table* in the bar lays the same articles over the disc as
+sortable rows — title, in-links over the wiki, links on the disc, words, wedge, hop or role,
+kind, reading state, last edited — with a text filter and *Copy as Markdown* (a Markdown
+table with Kiwix links). The rows are what the disc shows: hide a wedge in the legend or
+narrow the date range and they go, through the page's own `willShow()`. A row selects the
+dot and opens the article. Nothing is fetched; the view data is already in the page.
+
 **A reading list.** *To read* and *read* on the card and in the reader bar (one button
 there, cycling). Marked articles wear a halo on the disc — gold to read, green read — put on
 the nodes by the page before the disc is built, and a tag on the card; the *Reading* panel

@@ -21,7 +21,7 @@ rules beside the card's other styles. The sidebar gained *Export CSV* / *Export 
 disc shows by the planner's own `willShow()` test. A node may carry an optional `size` (0..1);
 when it does, the dot's radius comes from it rather than from the degree, which still
 places the dot. The object `mountVaultGraph` returns exposes `api.idOf(label)`, `api.hover(label)`
-and `api.select(label)`, so the host can address dots by title, and the card's neighbour
+and `api.select(label)` and `api.willShow(id)`, so the host can address dots by title and ask what is shown, and the card's neighbour
 list calls `deps.onNeighbour(from, to)`. Layout, rendering and interaction are otherwise
 untouched.
 

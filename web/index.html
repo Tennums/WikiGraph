@@ -125,6 +125,35 @@
   #mount { flex: 1; min-width: 0; position: relative; }
   #mount > .vault-graph { height: 100%; }
 
+  /* The table: over the disc, which keeps its size underneath so nothing re-fits. */
+  /* Above the disc's own card and tool buttons (z 6-8 inside the mount), below the
+     reader when that floats over the disc on a narrow screen (z 10). */
+  #table { position: absolute; inset: 0; z-index: 9; display: flex; flex-direction: column;
+           background: #14161a; }
+  #table[hidden] { display: none; }
+  #tableBar { display: flex; gap: 8px; align-items: center; padding: 6px 12px;
+              background: #1b1e24; border-bottom: 1px solid #2c313a; }
+  #tableFilter { width: 200px; }
+  #tableCount { color: #8b93a1; flex: 1; }
+  #tableScroll { flex: 1; overflow: auto; }
+  #table table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  #table th, #table td { padding: 4px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid #22262d; }
+  #table th { position: sticky; top: 0; background: #1b1e24; color: #8b93a1; font-weight: 600;
+              cursor: pointer; user-select: none; }
+  #table th:hover { color: #e8e8ea; }
+  #table th.on { color: #9fd0ff; }
+  #table th.on::after { content: " ▾"; }
+  #table th.on.asc::after { content: " ▴"; }
+  #table td.num, #table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  #table tbody tr { cursor: pointer; }
+  #table tbody tr:hover { background: #1b1e24; }
+  #table tbody tr.sel { background: #23272f; }
+  #table td.title { max-width: 360px; overflow: hidden; text-overflow: ellipsis; color: #e8e8ea; }
+  #table td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  #table td .mark { font-size: 11px; }
+  #table td .mark.toread { color: #ffd166; }
+  #table td .mark.read { color: #b6f09c; }
+
   /* The article beside the disc. Width is the reader's, in a CSS variable the divider
      drags; the disc takes the rest and re-fits itself (upstream watches its own box). */
   #reader { width: var(--reader-w, 44%); min-width: 320px; max-width: 75%; z-index: 10;
@@ -191,6 +220,7 @@
   <button id="star" title="Save this view in this browser" aria-label="Save this view">&#9734;</button>
   <button id="savedBtn" title="Saved views">Saved</button>
   <button id="readingBtn" title="Your reading list: articles marked to read or read">Reading</button>
+  <button id="tableBtn" title="The disc's articles as a sortable table" aria-pressed="false">Table</button>
   <select id="reading" title="Reading state as a filter on every view. Marked articles wear a halo: gold to read, green read.">
     <option value="all" selected>all articles</option>
     <option value="unread">hide read</option>
@@ -288,6 +318,15 @@
 
 <div id="main">
   <div id="mount"></div>
+  <div id="table" hidden>
+    <div id="tableBar">
+      <input type="text" id="tableFilter" placeholder="filter rows">
+      <span id="tableCount"></span>
+      <button id="tableCopy" title="These rows as Markdown, on the clipboard">Copy as Markdown</button>
+      <button id="tableClose" title="Back to the disc">&times;</button>
+    </div>
+    <div id="tableScroll"><table><thead><tr></tr></thead><tbody></tbody></table></div>
+  </div>
   <div id="divider" hidden title="Drag to resize"></div>
   <aside id="reader" hidden>
     <div id="readerBar">
@@ -495,6 +534,7 @@ async function draw({ push = true, fromGame = false } = {}) {
   });
   disc.labels = new Set(data.nodes.map((n) => n.label));
   disc.data = data;
+  table.refresh();
   reader.markLinks();
   const drawn = Math.round(performance.now() - t1);
   // The legend heading is static markup; say what the wedges are this time.
@@ -1352,6 +1392,125 @@ if (!info.textSearch) {
 if (info.minLenDefault !== undefined && !location.hash.includes("minlen=")) {
   $("minlen").value = String(info.minLenDefault);
 }
+
+/**
+ * The disc as a table. Same articles, same visibility -- the legend's hidden wedges
+ * and the date range apply, through the page's own willShow() -- as sortable rows: a
+ * disc is good to see, a table to work through. A row click selects the dot and, with
+ * a reader, opens the article. Redrawn after every draw while open; the rows are the
+ * view data already in the page, so there is nothing to fetch.
+ */
+const table = {
+  open: false, sort: { key: "deg", asc: false },
+  COLS: [
+    ["label", "Article", false],
+    ["indeg", "In-links (wiki)", true],
+    ["deg", "Links (disc)", true],
+    ["words", "Words", true],
+    ["folder", "Wedge", false],
+    ["type", "Hop / role", false],
+    ["kind", "Kind", false],
+    ["mark", "Reading", false],
+    ["touched", "Last edited", false],
+  ],
+  rows() {
+    const d = disc.data, api = disc.api();
+    if (!d || !api) return [];
+    const q = $("tableFilter").value.trim().toLowerCase();
+    const out = [];
+    d.nodes.forEach((n, i) => {
+      if (!api.willShow(String(i))) return;
+      const kind = (n.tags ?? []).find((t) => !["read", "to read"].includes(t)) ?? "";
+      const r = { i, label: n.label, indeg: n.indeg ?? 0, deg: n.deg, words: n.words, folder: n.folder,
+                  type: n.type, kind, mark: n.mark ?? "", touched: n.touched, colour: api.colorOf(n.folder) };
+      if (q && !`${r.label} ${r.folder} ${r.type} ${r.kind} ${r.mark}`.toLowerCase().includes(q)) return;
+      out.push(r);
+    });
+    const { key, asc } = this.sort;
+    const num = this.COLS.find((c) => c[0] === key)[2];
+    out.sort((a, b) => {
+      const c = num ? a[key] - b[key] : String(a[key]).localeCompare(String(b[key]), undefined, { numeric: true });
+      return (asc ? c : -c) || a.label.localeCompare(b.label);
+    });
+    return out;
+  },
+  refresh() {
+    if (!this.open) return;
+    const head = $("table").querySelector("thead tr");
+    head.replaceChildren(...this.COLS.map(([key, name, num]) => {
+      const th = document.createElement("th");
+      th.textContent = name;
+      th.className = (num ? "num " : "") + (this.sort.key === key ? "on " + (this.sort.asc ? "asc" : "") : "");
+      th.addEventListener("click", () => {
+        this.sort = this.sort.key === key ? { key, asc: !this.sort.asc } : { key, asc: !num };
+        this.refresh();
+      });
+      return th;
+    }));
+    const rows = this.rows();
+    const sel = disc.api()?.state?.selected;
+    const body = $("table").querySelector("tbody");
+    body.replaceChildren(...rows.map((r) => {
+      const tr = document.createElement("tr");
+      if (String(r.i) === sel) tr.className = "sel";
+      const cell = (html, cls) => { const td = document.createElement("td"); td.className = cls ?? ""; td.append(html); tr.append(td); };
+      const t = document.createElement("span");
+      const sw = document.createElement("i"); sw.className = "sw"; sw.style.background = r.colour;
+      t.append(sw, r.label);
+      cell(t, "title");
+      cell(r.indeg.toLocaleString(), "num");
+      cell(String(r.deg), "num");
+      cell(r.words.toLocaleString(), "num");
+      cell(r.folder);
+      cell(r.type);
+      cell(r.kind);
+      const m = document.createElement("span"); m.className = `mark ${r.mark}`;
+      m.textContent = r.mark === "read" ? "\u2713 read" : r.mark === "toread" ? "\u2605 to read" : "";
+      cell(m);
+      cell(r.touched);
+      tr.addEventListener("click", () => {
+        disc.api()?.select(r.label);
+        body.querySelector("tr.sel")?.classList.remove("sel");
+        tr.classList.add("sel");
+        if (info.reader) reader.show(`${info.reader}/${encodeURIComponent(r.label.replace(/ /g, "_"))}`, r.label);
+      });
+      return tr;
+    }));
+    const n = disc.data?.nodes.length ?? 0;
+    $("tableCount").textContent = rows.length === n ? `${n.toLocaleString()} articles`
+                                : `${rows.length.toLocaleString()} of ${n.toLocaleString()} articles`;
+  },
+  show() {
+    this.open = true;
+    $("table").hidden = false;
+    $("tableBtn").setAttribute("aria-pressed", "true");
+    this.refresh();
+  },
+  hide() {
+    this.open = false;
+    $("table").hidden = true;
+    $("tableBtn").setAttribute("aria-pressed", "false");
+  },
+  async copy() {
+    const rows = this.rows();
+    const lines = [`# ${disc.data.vault}`, "", `${rows.length} articles · ${location.href}`, "",
+      "| Article | In-links | Links on disc | Words | Wedge | Hop / role |", "|---|---:|---:|---:|---|---|",
+      ...rows.map((r) => `| ${reading.link(r.label)} | ${r.indeg} | ${r.deg} | ${r.words} | ${r.folder} | ${r.type} |`)];
+    await reading.clip(lines.join("\n"), `${rows.length} rows`);
+  },
+};
+$("tableBtn").addEventListener("click", () => (table.open ? table.hide() : table.show()));
+$("tableClose").addEventListener("click", () => table.hide());
+$("tableFilter").addEventListener("input", () => table.refresh());
+$("tableCopy").addEventListener("click", () => table.copy());
+// The legend and the date range change what the disc shows; the table follows. The
+// page has no event for it, so a light poll while the table is open is the honest way.
+setInterval(() => {
+  if (!table.open || !disc.api()) return;
+  const sig = (disc.api().state?.selected ?? "") + ":" +
+              disc.data.nodes.map((n, i) => disc.api().willShow(String(i)) ? 1 : 0).join("");
+  if (sig !== table.sig) { table.sig = sig; table.refresh(); }
+}, 800);
 
 /**
  * The reading list. Articles marked "to read" or "read", in localStorage like the

@@ -8331,6 +8331,7 @@ function mountVaultGraph(root, data, deps) {
                       var id = idByLabel[label];
                       if (id) goTo(id);
                     },
+                    willShow: willShow,
                     readTheme: readTheme, get renderer() { return renderer; },
                     placeLogo: placeLogo,
                     palette: paletteInfo,

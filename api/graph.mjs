@@ -834,6 +834,8 @@ export class WikiGraph {
         touched: t ? `${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6, 8)}` : "",
         words: r ? Math.round(Number(r.len) / 6) : 0, // bytes -> rough word count
         deg: degOnDisc[pos.get(id)],
+        // The article's standing in the whole wiki, beside its degree on this disc.
+        indeg: this.indeg[id],
         ...(sizeOf ? { size: Number(sizeOf(pos.get(id)).toFixed(3)) } : {}),
       };
     });
