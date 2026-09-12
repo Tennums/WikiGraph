@@ -48,6 +48,12 @@ comes as `nodes.csv` (title, wedge, type, kind, links on disc, words, last edite
 same in one file. The edge list is taken from the data the API sent, not from the
 renderer's store, which past a few thousand links keeps only a share of them for drawing.
 
+**Six degrees** is a game made of parts that already exist: two random well-linked
+articles at least three hops apart, a walk from one to the other with *Draw around this*,
+and at the end the route set against the shortest path. The disc's own search is pointed
+at the target while you play, so it lights up the moment it is within reach — seeing it is
+fair; finding the way there is the game. *Give up* shows the shortest route instead.
+
 Every view is a URL. The controls mirror into the hash —
 `#view=path&q=Cheese&q2=Black+hole&limit=1000` — so a view can be bookmarked or sent,
 and the browser's back button retraces a walk. The detail card's **Draw around this**
