@@ -594,6 +594,21 @@
     margin: 0 0 4px 8px; border-radius: 4px; border: 1px solid var(--border);
   }
   .vault-graph #vg-detail .preview.pending { color: var(--text-3); font-style: italic; }
+  /* wikigraph: "why?" beside a neighbour, and the sentence it opens. */
+  .vault-graph #vg-detail ul li { display: flex; flex-wrap: wrap; align-items: baseline; }
+  .vault-graph #vg-detail ul li > button:first-child { flex: 1; min-width: 0; }
+  .vault-graph #vg-detail button.why {
+    flex: none; font: inherit; font-size: 10px; line-height: 1; color: var(--text-3);
+    background: none; border: 1px solid var(--border); border-radius: 999px;
+    width: 16px; height: 16px; padding: 0; margin-left: 4px; cursor: pointer;
+  }
+  .vault-graph #vg-detail button.why:hover, .vault-graph #vg-detail button.why.on { color: var(--text); border-color: var(--text-3); }
+  .vault-graph #vg-detail .why-out {
+    flex-basis: 100%; font-size: 11px; line-height: 1.4; color: var(--text-2);
+    margin: 2px 0 6px 8px; padding-left: 8px; border-left: 2px solid var(--border);
+  }
+  .vault-graph #vg-detail .why-out b { color: var(--text); font-weight: 600; }
+  .vault-graph #vg-detail .why-out i { color: var(--text-3); }
   /* wikigraph: the facts block under the preview -- a line of numbers, then the
      categories as chips that act (draw the category, or filter to it). */
   .vault-graph #vg-detail .facts { font-size: 11px; color: var(--text-2); margin: 6px 0 2px; }

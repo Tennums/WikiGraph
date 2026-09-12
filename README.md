@@ -82,6 +82,17 @@ Every view is a URL. The controls mirror into the hash —
 and the browser's back button retraces a walk. The detail card's **Draw around this**
 makes the article the new centre; each click is a page in the history.
 
+**Why does A link to B.** A link is a line on the disc; the sentence behind it is the
+argument. *?* beside a neighbour on the card fetches the article from Kiwix, finds the first
+link to that neighbour in running text (paragraphs and list items — not infoboxes or
+navboxes), walks the block's text with references skipped, and cuts the sentence around
+the anchor: *Cheese* → *History*: "People have been making cheese since before **history**
+was written down." When the article has no such link the edge was drawn the other way, so
+the neighbour is searched instead and the answer says so. On a path view the same runs for
+every hop and lands under the bar as a numbered explanation of the route — *Science →
+Black hole*: "This idea helped scientists understand things like **black holes**…". Parsed
+documents are cached, a few dozen at a time, and shared with the preview.
+
 **The card says where an article stands.** Under the preview: *#5,874 of 284,808* by
 in-degree (and by PageRank), links in and out over the whole wiki, length — from
 `/api/article`, answered by a binary search over a sorted copy of each signal made on first

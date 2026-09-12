@@ -5054,12 +5054,17 @@ function mountVaultGraph(root, data, deps) {
           '&#8982; Draw around this</button>' : "") +
       '</div>';
 
+    // wikigraph: a "why?" beside each neighbour when the host can explain a link --
+    // it is handed an empty element under the row and fills it with the sentence.
+    var canWhy = typeof deps.linkWhy === "function" && !a.ghost;
     if (nb.length) {
       h += '<div class="nb">Linked articles (' + nb.length + ')</div><ul>' +
         nb.slice(0, 40).map(function (n) {
           return '<li><button data-go="' + n + '">' +
                  esc(graph.getNodeAttribute(n, "label")) +
-                 ' <span style="color:var(--text-3)">' + graph.getNodeAttribute(n, "deg") + '</span></button></li>';
+                 ' <span style="color:var(--text-3)">' + graph.getNodeAttribute(n, "deg") + '</span></button>' +
+                 (canWhy ? '<button class="why" data-why="' + n + '" title="Why is this a link? The sentence that makes it">?</button>' +
+                           '<div class="why-out" hidden></div>' : '') + '</li>';
         }).join("") + '</ul>';
     } else {
       h += '<div class="nb">No links</div>';
@@ -5100,6 +5105,14 @@ function mountVaultGraph(root, data, deps) {
     });
     Array.prototype.forEach.call(d.querySelectorAll("[data-tr]"), /** @param {HTMLElement} b */ function (b) {
       b.onclick = function () { trailBackTo(+b.getAttribute("data-tr")); };
+    });
+    Array.prototype.forEach.call(d.querySelectorAll("[data-why]"), /** @param {HTMLElement} b */ function (b) {
+      b.onclick = function () {
+        var out = b.nextElementSibling;
+        if (!out.hidden) { out.hidden = true; b.classList.remove("on"); return; }
+        out.hidden = false; b.classList.add("on");
+        if (!out.hasChildNodes()) deps.linkWhy(a.label, graph.getNodeAttribute(b.getAttribute("data-why"), "label"), out);
+      };
     });
     renderer.refresh();
   }

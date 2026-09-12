@@ -75,6 +75,19 @@
   #trailClear { padding: 0 6px; font: inherit; color: #8b93a1; background: transparent;
                 border: 1px solid transparent; }
   #trailClear:hover { border-color: #333944; color: #e8e8ea; }
+  /* The path explained: one sentence per hop, under the trail. */
+  #pathWhy { display: flex; gap: 6px; align-items: flex-start; padding: 6px 12px;
+             background: #181b20; border-bottom: 1px solid #2c313a; font-size: 12px; }
+  #pathWhy[hidden] { display: none; }
+  #pathWhyItems { flex: 1; min-width: 0; margin: 0; padding: 0 0 0 18px; color: #c4c9d2; }
+  #pathWhyItems li { margin: 1px 0; }
+  #pathWhyItems .hop { color: #9fd0ff; font-weight: 600; }
+  #pathWhyItems b { color: #e8e8ea; }
+  #pathWhyItems i { color: #8b93a1; }
+  #pathWhyItems .none { color: #8b93a1; font-style: italic; }
+  #pathWhyClose { padding: 0 6px; font: inherit; color: #8b93a1; background: transparent;
+                  border: 1px solid transparent; }
+  #pathWhyClose:hover { border-color: #333944; color: #e8e8ea; }
   #game { display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
           padding: 6px 12px; background: #1f2a1c; border-bottom: 1px solid #2f4a2a; }
   /* An author `display` beats the browser's own [hidden] rule, so the attribute alone
@@ -216,6 +229,11 @@
 <div id="trail" hidden>
   <span id="trailItems"></span>
   <button id="trailClear" title="Forget this walk">&times;</button>
+</div>
+
+<div id="pathWhy" hidden>
+  <ol id="pathWhyItems"></ol>
+  <button id="pathWhyClose" title="Hide the explanation" aria-label="Hide the explanation">&times;</button>
 </div>
 
 <div id="game" hidden>
@@ -403,6 +421,11 @@ async function draw({ push = true, fromGame = false } = {}) {
     articlePreview: info.reader ? articlePreview : undefined,
     // Rank and categories under it, from the API; the chips draw or filter.
     articleFacts,
+    // "why?" beside a neighbour: the sentence that makes the link, from Kiwix.
+    linkWhy: info.reader ? (from, to, el) => {
+      el.textContent = "…";
+      linkSnippet(from, to).then((sn) => { if (el.isConnected) el.replaceChildren(snippetNode(sn, from, to)); });
+    } : undefined,
     // A neighbour clicked on the card: if the article on the card is the one being
     // read, scroll the reader to the link that made them neighbours.
     onNeighbour: (from, to) => reader.scrollToLink(from, to),
@@ -429,6 +452,7 @@ async function draw({ push = true, fromGame = false } = {}) {
 
   // The seed's canonical title (it is the pinned node), not what was typed.
   trailRecord(view, data.pinned?.length ? data.nodes[Number(data.pinned[0])].label : q);
+  pathWhy(data.pathTitles);
   saved.drawn(data.vault);
 
   status((data.within ? `${data.within.articles.toLocaleString()} articles under ${data.within.name} · ` : "") +
@@ -846,6 +870,130 @@ function leadImage(doc, articleUrl) {
   };
   return pick(root.querySelectorAll(".infobox img"), true)
       ?? pick(root.querySelectorAll(".thumb img, figure img, .thumbimage"), false);
+}
+
+/**
+ * Articles as parsed documents, shared by the preview, the facts and the snippets.
+ * A few dozen kept; the same article is asked about many times while a card is open.
+ */
+const docCache = new Map();
+async function fetchDoc(label) {
+  const title = label.replace(/ /g, "_");
+  if (docCache.has(title)) { const d = docCache.get(title); docCache.delete(title); docCache.set(title, d); return d; }
+  let doc = null;
+  try {
+    const url = `${info.reader}/${encodeURIComponent(title)}`;
+    const res = await fetch(url);
+    if (res.ok) { doc = new DOMParser().parseFromString(await res.text(), "text/html"); doc.wgUrl = url; }
+  } catch {}
+  docCache.set(title, doc);
+  if (docCache.size > 40) docCache.delete(docCache.keys().next().value);
+  return doc;
+}
+
+/**
+ * Why does `from` link to `to`: the sentence in `from` where the link is made. A link
+ * is a line on the disc; the sentence is the argument behind it. Looks for the first
+ * link to `to` in running text (paragraphs and list items, not infoboxes or navboxes),
+ * walks that block's text with references skipped to find the anchor's offset, and
+ * cuts the sentence around it. When `from` has no such link the edge was drawn the
+ * other way round, so the same is tried from `to`, flagged `reverse`.
+ * Returns { text, at, len, reverse } or null; `at`/`len` mark the anchor in `text`.
+ */
+async function linkSnippet(from, to) {
+  const direct = await snippetIn(from, to);
+  if (direct) return direct;
+  const back = await snippetIn(to, from);
+  return back ? { ...back, reverse: true } : null;
+}
+async function snippetIn(from, to) {
+  if (!info.reader) return null;
+  const doc = await fetchDoc(from);
+  if (!doc) return null;
+  const root = doc.querySelector("#mw-content-text") ?? doc.body;
+  const want = to.replace(/ /g, "_");
+  let anchor = null;
+  for (const a of root.querySelectorAll("p a[href], li a[href], dd a[href]")) {
+    if (a.closest("table, .navbox, .reflist, .references, .hatnote, .dablink, sup, figure, .thumb")) continue;
+    let t;
+    try { t = decodeURIComponent(new URL(a.getAttribute("href"), doc.wgUrl).pathname.split("/").pop()); } catch { continue; }
+    if (t === want) { anchor = a; break; }
+  }
+  if (!anchor) return null;
+  const block = anchor.closest("p, li, dd") ?? anchor.parentElement;
+  // The block's text with references and edit links left out, and where the anchor
+  // falls in it.
+  const walker = doc.createTreeWalker(block, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => n.parentElement?.closest("sup.reference, .reference, .mw-editsection, style, script")
+      ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  });
+  let text = "", at = -1;
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (at < 0 && anchor.contains(n)) at = text.length;
+    text += n.nodeValue;
+  }
+  if (at < 0) return null;
+  const len = anchor.textContent.length;
+  // Sentence boundaries: a full stop, question or exclamation mark followed by space
+  // and a capital (or a quote/bracket), which is what an abbreviation is usually not.
+  const ends = [];
+  for (const m of text.matchAll(/[.!?]["')\]]?(?=\s+["(\[]?[A-Z0-9])/g)) ends.push(m.index + m[0].length);
+  let start = 0, end = text.length;
+  for (const e of ends) { if (e <= at) start = e; else { end = e; break; } }
+  let sentence = text.slice(start, end).replace(/\s+/g, " ");
+  let a2 = at - start - (text.slice(start, at).length - text.slice(start, at).replace(/\s+/g, " ").length);
+  // Leading space after the previous full stop; and a hard cap so a list-item essay
+  // stays a snippet.
+  const lead = sentence.match(/^\s*/)[0].length;
+  sentence = sentence.trimStart(); a2 -= lead;
+  const CAP = 320;
+  if (sentence.length > CAP) {
+    const lo = Math.max(0, Math.min(a2 - 120, sentence.length - CAP));
+    sentence = (lo ? "…" : "") + sentence.slice(lo, lo + CAP).trimEnd() + "…";
+    a2 = a2 - lo + (lo ? 1 : 0);
+  }
+  return { text: sentence, at: a2, len, reverse: false };
+}
+
+/**
+ * A path, explained: under the trail, one line per hop with the sentence that makes
+ * the link. Only for path views with a reader; anything else clears it. Filled as the
+ * fetches come in, in order, since the first hop is the one read first.
+ */
+let pathWhySeq = 0;
+async function pathWhy(titles) {
+  const seq = ++pathWhySeq;
+  const box = $("pathWhy"), list = $("pathWhyItems");
+  if (!titles || titles.length < 2 || !info.reader) { box.hidden = true; list.replaceChildren(); return; }
+  list.replaceChildren(...titles.slice(1).map((t, i) => {
+    const li = document.createElement("li");
+    const hop = document.createElement("span");
+    hop.className = "hop"; hop.textContent = `${titles[i]} → ${t}`;
+    li.append(hop, " — ", "…");
+    return li;
+  }));
+  box.hidden = false;
+  for (let i = 1; i < titles.length; i++) {
+    const sn = await linkSnippet(titles[i - 1], titles[i]);
+    if (seq !== pathWhySeq) return;   // a newer draw took over
+    const li = list.children[i - 1];
+    li.lastChild.remove();
+    const out = snippetNode(sn, titles[i - 1], titles[i]);
+    if (!sn) { const e = document.createElement("span"); e.className = "none"; e.append(out); li.append(e); }
+    else li.append(out);
+  }
+}
+$("pathWhyClose").addEventListener("click", () => { $("pathWhy").hidden = true; });
+
+/** The snippet as DOM: the sentence with the link text in bold. */
+function snippetNode(sn, from, to) {
+  const frag = document.createDocumentFragment();
+  if (!sn) { frag.append("no sentence found — the link is in a table or a navbox"); return frag; }
+  if (sn.reverse) { const i = document.createElement("i"); i.textContent = `${to} → ${from}: `; frag.append(i); }
+  frag.append(sn.text.slice(0, sn.at));
+  const b = document.createElement("b"); b.textContent = sn.text.slice(sn.at, sn.at + sn.len); frag.append(b);
+  frag.append(sn.text.slice(sn.at + sn.len));
+  return frag;
 }
 
 function firstParagraph(doc) {
