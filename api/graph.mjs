@@ -304,19 +304,41 @@ export class WikiGraph {
       // prefix is the slow case; the UI asks for two characters or more.
       // The index can only pre-sort by in-degree; when ranking by PageRank a wider net
       // is fetched and re-ranked here, since the two orders differ in the middle.
+      // Older indexes have no alias column; COALESCE keeps them working.
       rows = this.fts
-        .prepare("SELECT idx, title FROM titles WHERE titles MATCH ? ORDER BY indeg DESC LIMIT ?")
+        .prepare("SELECT idx, title, alias FROM titles WHERE titles MATCH ? ORDER BY indeg DESC LIMIT ?")
         .all(match, rankBy === "pagerank" ? limit * 25 : limit * 5)
-        .map((r) => ({ idx: Number(r.idx), title: String(r.title).replace(/ /g, "_") }));
+        .map((r) => ({ idx: Number(r.idx), matched: String(r.title).replace(/ /g, "_"),
+                       alias: Number(r.alias) === 1 }));
     } else {
       rows = this.db
         .prepare("SELECT idx, title FROM node WHERE title LIKE ? LIMIT ?")
         .all(text.replace(/ /g, "_") + "%", Math.max(200, limit * 10))
-        .map((r) => ({ idx: Number(r.idx), title: String(r.title) }));
+        .map((r) => ({ idx: Number(r.idx), matched: String(r.title), alias: false }));
     }
-    return rows
-      .map((h) => ({ ...h, deg: this.indeg[h.idx], score: score[h.idx] }))
-      .filter((h) => ok(h.idx))
+    // One hit per article. "USA", "U.S." and "United States" all point at the same
+    // idx; the article wins the slot, and if only a redirect matched, the hit says so.
+    //
+    // An alias counts only when it *starts with* what was typed. A redirect inherits
+    // its target's importance, so any looser match lets a hub in through a side door:
+    // "new york" surfaced *Town* through the redirect "Town (New York)", and "united
+    // states" surfaced *Time zone* through "Time in the United States". Titles keep
+    // the word-prefix behaviour; aliases are held to the name itself.
+    const typed = text.toLowerCase().replace(/_/g, " ");
+    const best = new Map();
+    for (const h of rows) {
+      if (!ok(h.idx)) continue;
+      if (h.alias && !h.matched.toLowerCase().replace(/_/g, " ").startsWith(typed)) continue;
+      const cur = best.get(h.idx);
+      if (!cur || (cur.alias && !h.alias)) best.set(h.idx, h);
+    }
+    return [...best.values()]
+      .map((h) => ({
+        idx: h.idx,
+        title: h.alias ? this.titleOf(h.idx) : h.matched,
+        via: h.alias ? h.matched.replace(/_/g, " ") : undefined,
+        deg: this.indeg[h.idx], score: score[h.idx],
+      }))
       .sort((a, b) => b.score - a.score)
       .slice(0, limit);
   }

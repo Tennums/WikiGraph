@@ -277,7 +277,72 @@ def write_kinds(out: Path, wiki: str, titles, dab_idx: set, indeg=None) -> None:
             log(f"  {int(indeg[i]):8,}  {tag:14}  {titles[i]}")
 
 
-def write_search_index(out: Path, wiki: str, tmp: Path, titles, indeg) -> None:
+def write_redirect_aliases(out: Path, wiki: str, pairs) -> None:
+    """<wiki>.redirects.tsv.gz: one `title<TAB>idx` line per redirect that lands on an
+    article. Small (enwiki: ~80 MB), and the only thing the search index needs from
+    the redirect table."""
+    import gzip
+    path = out / f"{wiki}.redirects.tsv.gz"
+    count = 0
+    with gzip.open(path, "wt", encoding="utf-8") as fh:
+        for title, idx in pairs:
+            fh.write(f"{title}\t{idx}\n")
+            count += 1
+    log(f"wrote {path} ({count:,} redirect aliases)")
+
+
+def read_redirect_aliases(out: Path, wiki: str):
+    """The sidecar's pairs as a list, or None when there is no sidecar.
+
+    Not a generator: a function with `yield` in it hands back a generator object no
+    matter what, so a `return None` inside it can never signal a missing file --
+    which is exactly how the first version of this silently indexed no aliases."""
+    import gzip
+    path = out / f"{wiki}.redirects.tsv.gz"
+    if not path.exists():
+        return None
+    pairs = []
+    with gzip.open(path, "rt", encoding="utf-8") as fh:
+        for line in fh:
+            t, i = line.rstrip("\n").split("\t")
+            pairs.append((t, int(i)))
+    return pairs
+
+
+def derive_redirect_aliases(args, titles) -> list:
+    """For a build made before the sidecar existed: the same mapping from the page and
+    redirect dumps plus the database's own titles. ~10 minutes on enwiki, once; the
+    result is written as the sidecar so it is never needed again."""
+    title2idx = {t: i for i, t in enumerate(titles)}
+    log("reading page (redirect titles) ...")
+    redir_title: dict[int, str] = {}
+    for pid, ns, title, is_redirect, _, _ in dp.pages(dump(args.wiki, "page", args.dumps)):
+        if ns == NS_ARTICLE and is_redirect:
+            redir_title[pid] = title
+    log(f"  {len(redir_title):,} redirects")
+    log("reading redirect (targets) ...")
+    target: dict[int, str] = {}
+    for rd_from, ns, title in dp.redirects(dump(args.wiki, "redirect", args.dumps)):
+        if ns == NS_ARTICLE and rd_from in redir_title:
+            target[rd_from] = title
+    # Follow a chain of redirects the way the graph build does, a few hops at most.
+    rtitle2pid = {t: pid for pid, t in redir_title.items()}
+    pairs = []
+    for pid, title in redir_title.items():
+        t = target.get(pid)
+        for _ in range(MAX_REDIRECT_HOPS):
+            if t is None:
+                break
+            idx = title2idx.get(t)
+            if idx is not None:
+                pairs.append((title, idx))
+                break
+            t = target.get(rtitle2pid.get(t, -1))
+    write_redirect_aliases(args.out, args.wiki, pairs)
+    return pairs
+
+
+def write_search_index(out: Path, wiki: str, tmp: Path, titles, indeg, aliases=None) -> None:
     """A separate FTS5 database over titles, ranked by in-degree.
 
     Separate, because the main database lives on a NAS and is never written after the
@@ -294,19 +359,30 @@ def write_search_index(out: Path, wiki: str, tmp: Path, titles, indeg) -> None:
         PRAGMA journal_mode = OFF;
         PRAGMA synchronous  = OFF;
         CREATE VIRTUAL TABLE titles USING fts5(
-            title, idx UNINDEXED, indeg UNINDEXED,
+            title, idx UNINDEXED, indeg UNINDEXED, alias UNINDEXED,
             tokenize = 'unicode61 remove_diacritics 2'
         );
     """)
-    con.executemany("INSERT INTO titles (title, idx, indeg) VALUES (?, ?, ?)",
+    con.executemany("INSERT INTO titles (title, idx, indeg, alias) VALUES (?, ?, ?, 0)",
                     ((t.replace("_", " "), i, int(indeg[i])) for i, t in enumerate(titles)))
+    # Redirect titles as aliases: same target idx and in-degree, flagged so the API can
+    # fold them onto the article and say which name matched.
+    n_alias = 0
+    if aliases:
+        def rows():
+            nonlocal n_alias
+            for t, i in aliases:
+                n_alias += 1
+                yield (t.replace("_", " "), i, int(indeg[i]))
+        con.executemany("INSERT INTO titles (title, idx, indeg, alias) VALUES (?, ?, ?, 1)", rows())
     con.execute("INSERT INTO titles(titles) VALUES ('optimize')")
     con.commit()
     con.close()
     dest = out / f"{wiki}.search.db"
     dest.unlink(missing_ok=True)
     shutil.move(str(staged), str(dest))
-    log(f"wrote {dest} ({dest.stat().st_size / 1e6:.0f} MB, {len(titles):,} titles)")
+    log(f"wrote {dest} ({dest.stat().st_size / 1e6:.0f} MB, {len(titles):,} titles"
+        + (f" + {n_alias:,} redirect aliases" if n_alias else "") + ")")
 
 
 def main() -> None:
@@ -389,7 +465,11 @@ def main() -> None:
         if hn != len(titles):
             sys.exit(f"{rcsr} holds {hn:,} articles, the database {len(titles):,}")
         indeg = np.diff(np.fromfile(rcsr, dtype=np.int64, count=hn + 1, offset=HEADER))
-        write_search_index(args.out, args.wiki, tmp, titles, indeg)
+        aliases = read_redirect_aliases(args.out, args.wiki)
+        if aliases is None:
+            log("no redirect sidecar yet -- deriving it from the page and redirect dumps")
+            aliases = derive_redirect_aliases(args, titles)
+        write_search_index(args.out, args.wiki, tmp, titles, indeg, aliases)
         return
 
     if args.classify_only:
@@ -483,6 +563,8 @@ def main() -> None:
     # Dense 0..n-1 index over real articles -- the node ids the CSR and the UI use.
     pid2idx = np.full(max_pid + 1, -1, dtype=np.int32)
     pid2idx[np.array(art_pid, dtype=np.int64)] = np.arange(n, dtype=np.int32)
+    is_redirect = np.zeros(max_pid + 1, dtype=bool)
+    is_redirect[np.array(redirect_flags, dtype=np.int64)] = True
 
     # --------------------------------------------------------------- 2. redirects
     log("reading redirect ...")
@@ -512,6 +594,14 @@ def main() -> None:
                 break
     del hop
     log(f"  {chased:,} redirects resolved to articles")
+
+    # Redirect titles are how people name things -- "USA", "NYC", "Einstein" -- and the
+    # search index wants them as aliases of their targets. They are banked now, while
+    # title2pid still exists, as a small gzipped sidecar the index step can read back
+    # without touching a dump.
+    write_redirect_aliases(args.out, args.wiki,
+                           ((t, int(pid2idx[pid])) for t, pid in title2pid.items()
+                            if is_redirect[pid] and pid2idx[pid] >= 0))
 
     # ------------------------------------------------------------- 3. linktarget
     # lt_id -> node index, with redirects already folded in. This is the map that
@@ -808,7 +898,8 @@ def main() -> None:
     rn = int(np.fromfile(rcsr, dtype=np.int64, count=4)[2])
     indeg = np.diff(np.fromfile(rcsr, dtype=np.int64, count=rn + 1, offset=HEADER))
     write_kinds(args.out, args.wiki, art_title, dab_idx, indeg)
-    write_search_index(args.out, args.wiki, tmp, art_title, indeg)
+    write_search_index(args.out, args.wiki, tmp, art_title, indeg,
+                       read_redirect_aliases(args.out, args.wiki) or [])
     write_pagerank(csr, args.out, args.wiki)
 
 

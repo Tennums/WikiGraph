@@ -167,8 +167,15 @@ ms on a 1,500-node disc.
 **Search is a title index**, FTS5 in its own sidecar `<wiki>.search.db`: each word typed
 becomes a prefix term, case-insensitive with diacritics folded, ranked by in-degree. So
 "einstein" finds *Albert Einstein* first, "alb ein" finds it too, and "zurich" finds
-*Zürich*. Body-text search is Kiwix's job and already exists in its own UI. Without the
-sidecar the API falls back to a case-sensitive prefix match and says so at startup:
+*Zürich*. Redirect titles are in the index as aliases of their targets — "usa" finds
+*United States*, "nyc" *New York City*, and the hit says *via USA* — with one rule the
+titles do not have: an alias counts only when it starts with what was typed. A redirect
+inherits its target's importance, so any looser match lets a hub in through a side door
+("new york" surfaced *Town* through the redirect *Town (New York)*). The aliases come
+from a small sidecar `<wiki>.redirects.tsv.gz` the build writes; for a build made before
+it existed, `--index-only` derives it once from the page and redirect dumps. Body-text
+search is Kiwix's job and already exists in its own UI. Without the search sidecar the API
+falls back to a case-sensitive prefix match and says so at startup:
 
 ```bash
 docker compose --profile ingest run --rm ingest --wiki enwiki --index-only
@@ -244,7 +251,7 @@ All state lives on the NAS under `DATA_DIR`; the containers hold nothing of thei
 ```
 /media/vault/WikiGraph/
 ├── dumps/     enwiki-latest-*.sql.gz     (input, mounted read-only)
-├── graph/     enwiki.{csr,rcsr,db,kind,rank,search.db}   (built once, then read-only)
+├── graph/     enwiki.{csr,rcsr,db,kind,rank,search.db,redirects.tsv.gz}
 └── zim/       <ZIM_BOOK>.zim              (Kiwix)
 ```
 

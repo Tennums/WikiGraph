@@ -755,8 +755,11 @@ const typeahead = (el) => () => {
     const w = $("within").value.trim();
     const hits = await (await fetch(`api/search?q=${encodeURIComponent(v)}&hide=${hideValue()}&minlen=${$("minlen").value}&rank=${$("rank").value}${kind}` +
                                     (w && !kind ? `&within=${encodeURIComponent(w)}` : ""))).json();
+    // A hit found through a redirect shows the name that matched, so "usa" reads
+    // "United States — via USA" rather than a title that does not contain the query.
     $("hits").innerHTML = hits
-      .map((h) => `<option value="${h.title.replace(/_/g, " ")}">`).join("");
+      .map((h) => `<option value="${h.title.replace(/_/g, " ")}"` +
+                  (h.via ? ` label="via ${h.via}"` : "") + `>`).join("");
   }, 180);
 };
 $("q").addEventListener("input", typeahead($("q")));
