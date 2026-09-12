@@ -5023,6 +5023,10 @@ function mountVaultGraph(root, data, deps) {
     // fills it however it likes (here, the article's first paragraph from Kiwix). The
     // card itself never fetches anything.
     var canPreview = typeof deps.articlePreview === "function" && !a.ghost;
+    // wikigraph: and a facts block after it, same contract -- an empty element the
+    // host fills (rank, categories) -- kept apart from the preview because the preview
+    // clips to a few lines and fades, and facts must not.
+    var canFacts = typeof deps.articleFacts === "function" && !a.ghost;
     var file = encodeURIComponent(a.path.replace(/\.md$/, ""));
 
     var h = '<button class="x" title="Close">&times;</button>' +
@@ -5040,6 +5044,7 @@ function mountVaultGraph(root, data, deps) {
       '<div class="chip" style="border-style:dashed">' + esc(a.folder) +
         (a.sub ? ' / ' + esc(a.sub) : '') + ' / ' + esc(a.ntype) + '</div>' +
       (canPreview ? '<div class="preview" hidden></div>' : "") +
+      (canFacts ? '<div class="facts" hidden></div>' : "") +
       '<div class="actions">' +
         (a.ghost || !openHref ? "" : '<a class="open" href="' + esc(openHref) + '" target="_blank" rel="noopener">Read the article &rarr;</a>') +
         '<button class="btn pin" data-pin="' + id + '" aria-pressed="' + isPinned(id) + '" title="' +
@@ -5082,6 +5087,8 @@ function mountVaultGraph(root, data, deps) {
     }
     var pv = d.querySelector(".preview");
     if (pv) deps.articlePreview(a.label, pv);
+    var fc = d.querySelector(".facts");
+    if (fc) deps.articleFacts(a.label, fc);
     Array.prototype.forEach.call(d.querySelectorAll("[data-go]"), /** @param {HTMLElement} b */ function (b) {
       b.onclick = function () {
         var to = b.getAttribute("data-go");

@@ -594,6 +594,25 @@
     margin: 0 0 4px 8px; border-radius: 4px; border: 1px solid var(--border);
   }
   .vault-graph #vg-detail .preview.pending { color: var(--text-3); font-style: italic; }
+  /* wikigraph: the facts block under the preview -- a line of numbers, then the
+     categories as chips that act (draw the category, or filter to it). */
+  .vault-graph #vg-detail .facts { font-size: 11px; color: var(--text-2); margin: 6px 0 2px; }
+  .vault-graph #vg-detail .facts .line { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 4px; }
+  .vault-graph #vg-detail .facts .line b { color: var(--text); font-weight: 600; }
+  .vault-graph #vg-detail .facts .cat {
+    display: inline-flex; align-items: center; margin: 0 3px 3px 0; max-width: 100%;
+    border: 1px solid var(--border); border-radius: 999px; overflow: hidden;
+  }
+  .vault-graph #vg-detail .facts .cat.org { opacity: .6; }
+  .vault-graph #vg-detail .facts .cat button {
+    font: inherit; font-size: 10px; color: var(--text-2); background: none; border: 0;
+    padding: 1px 4px 1px 7px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .vault-graph #vg-detail .facts .cat button.within {
+    padding: 1px 6px 1px 4px; border-left: 1px solid var(--border); color: var(--text-3);
+  }
+  .vault-graph #vg-detail .facts .cat button:hover { color: var(--text); background: var(--surface-3, rgba(255,255,255,.06)); }
+  .vault-graph #vg-detail .facts .more { font-size: 10px; color: var(--text-3); background: none; border: 0; cursor: pointer; padding: 1px 4px; }
   .vault-graph #vg-detail .actions {
     display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px;
   }

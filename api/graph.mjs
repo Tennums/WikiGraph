@@ -281,6 +281,58 @@ export class WikiGraph {
   }
 
   /**
+   * Where an article stands: "#412 of 6,9M" by in-degree, and by PageRank when there
+   * is one. A sorted copy of each signal, made on first use (a second for enwiki, 28
+   * MB), then a binary search per question: the position is one more than the count
+   * of articles scoring strictly higher, so ties share a rank.
+   */
+  rankOf(idx) {
+    if (!this._sorted) {
+      this._sorted = {
+        indegree: Int32Array.from(this.indeg).sort((a, b) => b - a),
+        pagerank: this.rank ? Float32Array.from(this.rank).sort((a, b) => b - a) : null,
+      };
+    }
+    const above = (arr, v) => {           // count of entries strictly greater than v
+      let lo = 0, hi = arr.length;
+      while (lo < hi) { const mid = (lo + hi) >>> 1; if (arr[mid] > v) lo = mid + 1; else hi = mid; }
+      return lo;
+    };
+    return {
+      indegree: above(this._sorted.indegree, this.indeg[idx]) + 1,
+      pagerank: this._sorted.pagerank ? above(this._sorted.pagerank, this.rank[idx]) + 1 : null,
+    };
+  }
+
+  /**
+   * One article's facts for the card: what the graph and the database know that the
+   * view data does not carry. Categories come with hidden ones left out and the
+   * organising ones (stubs, "by year", Wikipedia's own housekeeping) after the ones
+   * that describe the subject, since the reader wants the latter first.
+   */
+  article(idx) {
+    const r = this.db.prepare("SELECT title, len, touched, deg, topic FROM node WHERE idx = ?").get(idx);
+    if (!r) return null;
+    const cats = this.db.prepare(
+      `SELECT c.pid, c.title FROM node_cat nc JOIN category c ON c.pid = nc.cat
+        WHERE nc.idx = ? AND c.hidden = 0 ORDER BY c.title`).all(idx)
+      .map((c) => ({ pid: Number(c.pid), title: String(c.title),
+                     organising: ORGANISING_CAT.test(String(c.title)) }))
+      .sort((a, b) => a.organising - b.organising);
+    const t = String(r.touched);
+    return {
+      idx, title: String(r.title),
+      kind: KIND_NAMES[this.kind[idx]],
+      len: Number(r.len),
+      touched: t ? `${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6, 8)}` : "",
+      indeg: this.indeg[idx], outdeg: Number(r.deg),
+      topic: r.topic ? String(r.topic) : null,
+      rank: this.rankOf(idx), of: this.n,
+      categories: cats,
+    };
+  }
+
+  /**
    * Title search, ranked by in-degree.
    *
    * With the FTS5 index: every word the user typed becomes a prefix term, so "alb ein"

@@ -11,7 +11,9 @@ three host callbacks: `deps.articleHref(label)` supplies the open button's targe
 of a hardcoded `obsidian://` URL, `deps.onRecenter(label)` adds a "Draw around this"
 button when present, `deps.articlePreview(label, el)` is handed an empty element in
 the card to fill (here, the article's first paragraph), and `deps.onOpen(label, href)`
-receives a plain click on the open button (modifier-clicks still follow the href). `page.css` gained the `.preview`
+receives a plain click on the open button (modifier-clicks still follow the href), and
+`deps.articleFacts(label, el)` is handed a second empty element under the preview, one that
+does not clip (rank and categories go there). `page.css` gained the `.preview`
 rules beside the card's other styles. The sidebar gained *Export CSV* / *Export JSON* beside *Save PNG*, exporting what the
 disc shows by the planner's own `willShow()` test. A node may carry an optional `size` (0..1);
 when it does, the dot's radius comes from it rather than from the degree, which still

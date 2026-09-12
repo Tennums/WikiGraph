@@ -82,6 +82,14 @@ Every view is a URL. The controls mirror into the hash —
 and the browser's back button retraces a walk. The detail card's **Draw around this**
 makes the article the new centre; each click is a page in the history.
 
+**The card says where an article stands.** Under the preview: *#5,874 of 284,808* by
+in-degree (and by PageRank), links in and out over the whole wiki, length — from
+`/api/article`, answered by a binary search over a sorted copy of each signal made on first
+use. Then the article's categories as chips, hidden ones left out, birth and death years
+after the ones that describe the subject, organising ones (stubs, *by year*) last and dimmed.
+A chip's name draws that category tree; *only* beside it keeps the current view and narrows
+it to the category.
+
 **The article and the disc know about each other.** Every link in the article whose target
 is a dot on the disc is underlined in gold (the reader bar counts them: *167 on the disc*
 for *Belgium* on *Around Belgium*); the mouse over one lights the dot, a click selects it

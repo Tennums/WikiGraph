@@ -215,6 +215,13 @@ const server = createServer(async (req, res) => {
         return json(res, 200, { idx: i, title: graph.titleOf(i).replace(/_/g, " "), indeg: graph.indeg[i] });
       }
 
+      /* One article's facts, for the card: rank, categories, degrees. */
+      case "/api/article": {
+        const i = graph.lookup(q.get("title") ?? "");
+        if (i < 0) return json(res, 404, { error: `no article "${q.get("title")}"` });
+        return json(res, 200, graph.article(i));
+      }
+
       /* Every view returns the same VAULT_DATA shape; only the selection differs. */
       case "/api/view/neighborhood": {
         const seed = graph.lookup(q.get("title") ?? "");

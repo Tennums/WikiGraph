@@ -401,6 +401,8 @@ async function draw({ push = true, fromGame = false } = {}) {
     // The first paragraph, from Kiwix, in the card. Only offered when a reader is
     // configured; without one the card simply has no preview block.
     articlePreview: info.reader ? articlePreview : undefined,
+    // Rank and categories under it, from the API; the chips draw or filter.
+    articleFacts,
     // A neighbour clicked on the card: if the article on the card is the one being
     // read, scroll the reader to the link that made them neighbours.
     onNeighbour: (from, to) => reader.scrollToLink(from, to),
@@ -713,6 +715,81 @@ async function articlePreview(label, el) {
   }
   previewCache.set(title, preview);
   if (!ctl.signal.aborted) showPreview(el, preview);
+}
+
+/**
+ * The facts block: where the article stands in the whole wiki, and its categories.
+ * The view data carries neither -- it is about the selection -- so the card asks per
+ * article, cached. Each category is two actions: its name draws the category tree,
+ * the ⊂ beside it keeps the current view and narrows it to that category.
+ */
+const factsCache = new Map();
+async function articleFacts(label, el) {
+  const title = label.replace(/ /g, "_");
+  let f = factsCache.get(title);
+  if (f === undefined) {
+    try {
+      const res = await fetch(`api/article?title=${encodeURIComponent(title)}`);
+      f = res.ok ? await res.json() : null;
+    } catch { f = null; }
+    factsCache.set(title, f);
+  }
+  if (!f || !el.isConnected) return;
+  el.replaceChildren();
+  const line = document.createElement("div");
+  line.className = "line";
+  const of = f.of >= 1e6 ? `${(f.of / 1e6).toFixed(1)}M` : f.of.toLocaleString();
+  const item = (html, tip) => { const s = document.createElement("span"); s.innerHTML = html; if (tip) s.title = tip; line.append(s); };
+  item(`<b>#${f.rank.indegree.toLocaleString()}</b> of ${of}`,
+       `By in-degree: ${f.indeg.toLocaleString()} articles link here` +
+       (f.rank.pagerank ? `; #${f.rank.pagerank.toLocaleString()} by PageRank` : ""));
+  if (f.rank.pagerank) item(`<b>#${f.rank.pagerank.toLocaleString()}</b> by PageRank`);
+  item(`<b>${f.indeg.toLocaleString()}</b> in`, "Articles linking here, in the whole wiki");
+  item(`<b>${f.outdeg.toLocaleString()}</b> out`, "Articles this one links to");
+  item(`${(f.len / 1000).toFixed(f.len < 10000 ? 1 : 0)} KB`, "Wikitext length");
+  el.append(line);
+
+  // Birth and death years are true categories but poor descriptions; they go after
+  // the ones that say what the article is about, before the organising ones.
+  const cats = f.categories.map((c) => ({ ...c, order: c.organising ? 2 : /^\d/.test(c.title) ? 1 : 0 }))
+    .sort((a, b) => a.order - b.order);
+  if (cats.length) {
+    const box = document.createElement("div");
+    const LIMIT = 6;
+    const chip = (c) => {
+      const w = document.createElement("span");
+      w.className = "cat" + (c.organising ? " org" : "");
+      const name = c.title.replace(/_/g, " ");
+      const draw = document.createElement("button");
+      draw.textContent = name;
+      draw.title = `Draw the category tree of ${name}`;
+      draw.addEventListener("click", () => {
+        $("view").value = "category"; $("q").value = name; syncControls(); draw_();
+      });
+      const within = document.createElement("button");
+      within.className = "within"; within.textContent = "only";
+      within.title = `Keep this view, only articles within ${name}`;
+      within.addEventListener("click", () => {
+        // From a category view there is no article in the box; the one on the card
+        // becomes the centre.
+        if ($("view").value === "category") { $("view").value = "neighborhood"; $("q").value = label; }
+        $("within").value = name; syncControls(); draw_();
+      });
+      w.append(draw, within);
+      return w;
+    };
+    const draw_ = () => draw();
+    cats.slice(0, LIMIT).forEach((c) => box.append(chip(c)));
+    if (cats.length > LIMIT) {
+      const more = document.createElement("button");
+      more.className = "more";
+      more.textContent = `+${cats.length - LIMIT} more`;
+      more.addEventListener("click", () => { more.remove(); cats.slice(LIMIT).forEach((c) => box.append(chip(c))); });
+      box.append(more);
+    }
+    el.append(box);
+  }
+  el.hidden = false;
 }
 
 function showPreview(el, preview) {
