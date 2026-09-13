@@ -98,6 +98,16 @@ section. On simplewiki: *Mass ×5, Particle ×4, Energy ×4, Speed of light, Sci
 cached; the set is drawn through `/api/view/set` with the article pinned. Whether the
 order convinces is a judgement made on screen, which is why it is marked experimental.
 
+**Category tools.** The category tree's depth is a select (*levels*, 1–6, `depth=` in the
+hash). A category view shows its parents above the disc — *German physicists: 54
+articles, 2 subcategories · up to Physicists by nationality · German scientists* — each a
+click up the tree, organising parents dimmed (`/api/category?title=` on its own returns
+parents, children and member counts). And *within* has two companions: ∩ narrows to
+articles under both categories, − takes one away; the masks are bytes, so *Geography ∩
+Europe* and *Geography − Europe* are a pass over the array, cached like single masks, and
+the status line says which (*63 articles under Geography and Europe*). *not* alone means
+everything but that category.
+
 **Keys, and a palette.** `?` lists them: `/` the article box, `[` `]` back and forward
 along the walk, `r` the selected article beside the disc, `t` the table, `f` zoom-to-article
 on or off, `Esc` closes the nearest open thing (palette, list, table, reader, strips, in

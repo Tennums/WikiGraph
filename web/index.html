@@ -50,6 +50,8 @@
   #sinceLabel input { margin: 0; accent-color: #e0b84a; }
   #withinLabel { padding-left: 10px; border-left: 1px solid #2c313a; }
   #within { width: 160px; }
+  .catbox { width: 120px; }
+  #andLabel, #notLabel { color: #8b93a1; }
   #status { margin-left: auto; color: #8b93a1; }
   #status.err { color: #ff8b8b; }
 
@@ -131,6 +133,13 @@
   #trailClear { padding: 0 6px; font: inherit; color: #8b93a1; background: transparent;
                 border: 1px solid transparent; }
   #trailClear:hover { border-color: #333944; color: #e8e8ea; }
+  /* A category's parents: the way up, above the disc. */
+  #catParents { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 4px 12px;
+                background: #181b20; border-bottom: 1px solid #2c313a; font-size: 12px; color: #8b93a1; }
+  #catParents[hidden] { display: none; }
+  #catParentsList { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+  #catParentsList button { padding: 1px 8px; }
+  #catParentsList button.org { opacity: .55; }
   /* Drawn around a disambiguation page: the choices it stands for. */
   #dab { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 12px;
          background: #2a2418; border-bottom: 1px solid #4a3f24; font-size: 12px; }
@@ -353,7 +362,13 @@
 
   <label for="within" id="withinLabel" title="Only articles filed under this category or its subcategories, three levels down. Seeds and path endpoints are always allowed.">within</label>
   <input type="text" id="within" list="cathits" placeholder="any category">
+  <label for="and" id="andLabel" title="…and also under this one: the intersection">and</label>
+  <input type="text" id="and" list="cathits" placeholder="category" class="catbox">
+  <label for="not" id="notLabel" title="…but not under this one: the difference">not</label>
+  <input type="text" id="not" list="cathits" placeholder="category" class="catbox">
   <datalist id="cathits"></datalist>
+  <label for="depth" id="depthLabel" title="How many levels of subcategories the category tree walks">levels</label>
+  <select id="depth"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option></select>
 
   <span id="status">loading…</span>
 </div>
@@ -406,6 +421,11 @@
 <div id="trail" hidden>
   <span id="trailItems"></span>
   <button id="trailClear" title="Forget this walk">&times;</button>
+</div>
+
+<div id="catParents" hidden>
+  <span id="catParentsText"></span>
+  <span id="catParentsList"></span>
 </div>
 
 <div id="dab" hidden>
@@ -487,7 +507,7 @@ const markup = await (await fetch("vendor/page.html")).text();
  * button. The hash rather than the query string: it never reaches the server, so a
  * shared link is just a link and the API stays cacheable by path.
  */
-const FIELDS = ["view", "q", "q2", "limit", "hops", "minlen", "within", "group", "rank", "size", "reading", "edges", "list"];
+const FIELDS = ["view", "q", "q2", "limit", "hops", "minlen", "within", "and", "not", "depth", "group", "rank", "size", "reading", "edges", "list"];
 const hideBoxes = () => [...document.querySelectorAll("#hide input")];
 const hideValue = () => hideBoxes().filter((b) => b.checked).map((b) => b.value).join(",");
 
@@ -521,6 +541,7 @@ function readHash() {
   if (!h.has("size")) $("size").value = "degree";
   if (!h.has("reading")) $("reading").value = "all";
   if (!h.has("edges")) $("edges").value = "plain";
+  if (!h.has("depth")) $("depth").value = "3";
   return true;
 }
 
@@ -546,7 +567,8 @@ function writeHash(push) {
     if (f === "reading" && $(f).value === "all") continue;
     if (f === "edges" && $(f).value === "plain") continue;
     // The category view is already a category; "within" would only repeat it.
-    if (f === "within" && (view === "category" || !$(f).value.trim())) continue;
+    if (["within", "and", "not"].includes(f) && (view === "category" || !$(f).value.trim())) continue;
+    if (f === "depth" && (view !== "category" || $(f).value === "3")) continue;
     h.set(f, $(f).value.trim());
   }
   h.set("hide", hideValue());
@@ -576,10 +598,12 @@ async function draw({ push = true, fromGame = false } = {}) {
   const w = $("within").value.trim();
   const hide = `&hide=${hideValue()}&minlen=${$("minlen").value}&group=${$("group").value}&rank=${$("rank").value}&size=${$("size").value}` +
                ($("mutual").checked ? "&mutual=1" : "") + ($("since").checked ? "&since=1" : "") +
-               (w && view !== "category" ? `&within=${encodeURIComponent(w)}` : "");
+               (w && view !== "category" ? `&within=${encodeURIComponent(w)}` : "") +
+               (view !== "category" && $("and").value.trim() ? `&and=${encodeURIComponent($("and").value.trim())}` : "") +
+               (view !== "category" && $("not").value.trim() ? `&not=${encodeURIComponent($("not").value.trim())}` : "");
   const url = (
     view === "top" ? `api/view/top?limit=${limit}`
-    : view === "category" ? `api/view/category?title=${t}&limit=${limit}&depth=3`
+    : view === "category" ? `api/view/category?title=${t}&limit=${limit}&depth=${$("depth").value}`
     : view === "path" ? `api/view/path?from=${t}&to=${encodeURIComponent($("q2").value.trim())}&limit=${limit}`
     : view === "common" ? `api/view/common?from=${t}&to=${encodeURIComponent($("q2").value.trim())}&limit=${limit}`
     : view === "similar" ? `api/view/similar?title=${t}&limit=${limit}`
@@ -719,6 +743,7 @@ async function draw({ push = true, fromGame = false } = {}) {
   pathWhy(data.pathTitles);
   orderStrip(data.order, data);
   dabStrip(data.dab);
+  catParentsStrip(data.category);
   saved.drawn(data.vault);
 
   status((data.set?.unknown?.length ? `not found: ${data.set.unknown.slice(0, 6).join(", ")}${data.set.unresolved > 6 ? ` +${data.set.unresolved - 6}` : ""} · ` : "") +
@@ -1430,6 +1455,23 @@ function dabStrip(dab) {
 }
 $("dabClose").addEventListener("click", () => { $("dab").hidden = true; });
 
+/** A category view's parents, above the disc: each a click up the tree. */
+function catParentsStrip(cat) {
+  const box = $("catParents");
+  if (!cat) { box.hidden = true; return; }
+  const name = cat.title.replace(/_/g, " ");
+  $("catParentsText").textContent = `${name}: ${cat.articles.toLocaleString()} articles, ${cat.children} subcategories` +
+    (cat.parents.length ? " · up to" : " · a top-level category");
+  $("catParentsList").replaceChildren(...cat.parents.map((p) => {
+    const b = document.createElement("button");
+    b.textContent = p.title.replace(/_/g, " ");
+    if (p.organising) { b.className = "org"; b.title = "An organising category (stubs, by-year, housekeeping)"; }
+    b.addEventListener("click", () => { $("q").value = p.title.replace(/_/g, " "); draw(); });
+    return b;
+  }));
+  box.hidden = false;
+}
+
 /** The order as a strip under the bar, trimmed to what the server kept (the filters). */
 function orderStrip(order, data) {
   const box = $("order"), body = $("orderBody");
@@ -1710,17 +1752,20 @@ $("q").addEventListener("input", typeahead($("q")));
 $("q2").addEventListener("input", typeahead($("q2")));
 
 let catTimer;
-$("within").addEventListener("input", () => {
-  clearTimeout(catTimer);
-  catTimer = setTimeout(async () => {
-    const v = $("within").value.trim();
-    if (v.length < 2) return;
-    const hits = await (await fetch(`api/search?q=${encodeURIComponent(v)}&kind=category`)).json();
-    $("cathits").innerHTML = hits
-      .map((h) => `<option value="${h.title.replace(/_/g, " ")}">`).join("");
-  }, 180);
-});
-$("within").addEventListener("change", () => draw());
+for (const id of ["within", "and", "not"]) {
+  $(id).addEventListener("input", () => {
+    clearTimeout(catTimer);
+    catTimer = setTimeout(async () => {
+      const v = $(id).value.trim();
+      if (v.length < 2) return;
+      const hits = await (await fetch(`api/search?q=${encodeURIComponent(v)}&kind=category`)).json();
+      $("cathits").innerHTML = hits
+        .map((h) => `<option value="${h.title.replace(/_/g, " ")}">`).join("");
+    }, 180);
+  });
+  $(id).addEventListener("change", () => draw());
+}
+$("depth").addEventListener("change", () => draw());
 
 const nbhdView = (view) => ["neighborhood", "in", "out"].includes(view);
 const syncControls = () => {
@@ -1744,6 +1789,8 @@ const syncControls = () => {
                      : view === "similar" ? "Belgium (by shared links)" : "Physics";
   $("within").disabled = $("withinLabel").hidden = view === "category";
   $("within").hidden = view === "category";
+  for (const id of ["and", "not"]) { $(id).hidden = $(id + "Label").hidden = view === "category"; }
+  $("depth").hidden = $("depthLabel").hidden = view !== "category";
 };
 $("view").addEventListener("change", syncControls);
 $("go").addEventListener("click", draw);

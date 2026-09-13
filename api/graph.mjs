@@ -95,7 +95,7 @@ function intersectSorted(a, b) {
  * wrong to name a wedge after. Most are flagged hidden in `page_props` and caught by
  * the flag; the pattern is for the wikis and cases that are not.
  */
-const ORGANISING_CAT = /(_stubs?|_templates|-related_lists|_by_[a-z_]+|_redirects)$|^(Wikipedia|WikiProject|Redirects|Stubs?)_|_articles(_|$)/;
+const ORGANISING_CAT = /(_stubs?|_templates|-related_lists|_by_[a-z_]+|_redirects)$|^(Wikipedia|WikiProject|Redirects|Stubs?|Commons_category|Articles_with|Articles_containing|Pages_with|Pages_using|All|CS1|Use_[a-z]+_dates|Webarchive|Short_description|Coordinates)_|_articles(_|$)/;
 
 /** Node kinds, as the ingest writes them into <wiki>.kind. */
 const label_ = (t) => String(t).replace(/_/g, " ");
@@ -540,6 +540,24 @@ export class WikiGraph {
   }
 
   /** Category names by prefix, biggest first -- for the category view's typeahead. */
+  /**
+   * A category's place in the tree: its parents (describing ones first, organising
+   * ones flagged so the page can dim them), how many children it has and how many
+   * articles are filed directly under it.
+   */
+  categoryInfo(pid) {
+    const row = this.db.prepare("SELECT title, hidden FROM category WHERE pid = ?").get(pid);
+    if (!row) return null;
+    const parents = this.db.prepare(
+      `SELECT c.pid, c.title, c.hidden FROM cat_tree t JOIN category c ON c.pid = t.parent WHERE t.child = ?`).all(pid)
+      .map((r) => ({ pid: Number(r.pid), title: String(r.title),
+                     organising: Number(r.hidden) === 1 || ORGANISING_CAT.test(String(r.title)) }))
+      .sort((a, b) => a.organising - b.organising || a.title.localeCompare(b.title));
+    const children = Number(this.db.prepare("SELECT count(*) AS n FROM cat_tree WHERE parent = ?").get(pid).n);
+    const articles = Number(this.db.prepare("SELECT count(*) AS n FROM node_cat WHERE cat = ?").get(pid).n);
+    return { pid, title: String(row.title), hidden: Number(row.hidden) === 1, parents, children, articles };
+  }
+
   searchCategories(q, limit = 20) {
     const t = String(q).trim().replace(/ /g, "_");
     if (!t) return [];

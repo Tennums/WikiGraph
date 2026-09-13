@@ -350,12 +350,36 @@ test("view: common ground", async () => {
   assert.equal(same.status, 400);
 });
 
-test("view: category", async () => {
+test("view: category, its parents, and within/and/not", async () => {
   const r = await get(`/api/view/category?title=German%20physicists&limit=800&depth=3&${HIDE}`);
   if (!FACTS && r.status === 404) return;
   assert.equal(r.status, 200);
   checkView(r.body);
   assert.match(r.body.vault, /^Category: /);
+  assert.ok(r.body.category && Array.isArray(r.body.category.parents), "parents on the view");
+  assert.ok(r.body.category.parents.length > 0, "a parent");
+  const info2 = await get("/api/category?title=German%20physicists");
+  assert.equal(info2.status, 200);
+  assert.ok(info2.body.articles > 0 && Number.isInteger(info2.body.children));
+  const firstOrg = info2.body.parents.findIndex((p) => p.organising);
+  if (firstOrg >= 0) assert.ok(info2.body.parents.slice(firstOrg).every((p) => p.organising), "organising parents last");
+  const shallow = await get(`/api/view/category?title=Physics&limit=3000&depth=1&${HIDE}`);
+  const deep = await get(`/api/view/category?title=Physics&limit=3000&depth=3&${HIDE}`);
+  assert.ok(shallow.body.nodes.length <= deep.body.nodes.length, "depth widens");
+  // within A and B, within A not B: fewer than A alone, never more; not alone works
+  const a = await get(`/api/view/top?limit=2000&${HIDE}&within=Geography`);
+  const ab = await get(`/api/view/top?limit=2000&${HIDE}&within=Geography&and=Europe`);
+  const anb = await get(`/api/view/top?limit=2000&${HIDE}&within=Geography&not=Europe`);
+  assert.equal(ab.status, 200); assert.equal(anb.status, 200);
+  assert.ok(ab.body.within.articles <= a.body.within.articles && anb.body.within.articles <= a.body.within.articles, "and/not narrow");
+  assert.equal(ab.body.within.articles + anb.body.within.articles, a.body.within.articles, "and + not = all of A");
+  assert.match(ab.body.within.name, /Geography and Europe/);
+  assert.match(anb.body.within.name, /Geography minus Europe/);
+  const onlyNot = await get(`/api/view/top?limit=50&${HIDE}&not=Geography`);
+  assert.equal(onlyNot.status, 200);
+  assert.match(onlyNot.body.within.name, /^everything minus Geography/);
+  const badAnd = await get(`/api/view/top?limit=50&${HIDE}&within=Geography&and=No%20Such%20Category%20Xyz`);
+  assert.equal(badAnd.status, 404);
   if (FACTS) assert.ok(r.body.nodes.some((n) => n.label === "Albert Einstein"), "Einstein is a German physicist");
   const miss = await get("/api/view/category?title=No%20Such%20Category%20Xyz");
   assert.equal(miss.status, 404);

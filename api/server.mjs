@@ -125,13 +125,39 @@ const minLen = (q) => {
  * request; an unknown category is reported rather than silently ignored, since a
  * filter that quietly does nothing is worse than one that fails.
  */
+/**
+ * `within=A` -> a membership mask; `and=B` narrows it to both, `not=C` takes C away.
+ * Masks are bytes, so the combination is a pass over the array; the result is cached
+ * like the single masks are. `not` alone means everything but C.
+ */
 const within = (q) => {
-  const name = (q.get("within") ?? "").trim();
-  if (!name) return { mask: null, name: "" };
-  const pid = graph.findCategory(name);
-  if (pid < 0) return { error: `no category "${name}"` };
   const depth = Math.max(1, Math.min(6, Number(q.get("withindepth")) || 3));
-  return { mask: graph.categoryMask(pid, depth), name: name.replace(/_/g, " ") };
+  const pick = (key) => {
+    const name = (q.get(key) ?? "").trim();
+    if (!name) return null;
+    const pid = graph.findCategory(name);
+    if (pid < 0) return { error: `no category "${name}"` };
+    return { mask: graph.categoryMask(pid, depth), name: name.replace(/_/g, " ") };
+  };
+  const a = pick("within"), b = pick("and"), c = pick("not");
+  for (const x of [a, b, c]) if (x?.error) return x;
+  if (!a && !b && !c) return { mask: null, name: "" };
+  const parts = [a, b].filter(Boolean);
+  let mask = parts.length ? parts[0].mask : null;
+  let name = parts.map((x) => x.name).join(" and ");
+  if (parts.length === 2 || c) {
+    const out = new Uint8Array(graph.n);
+    let count = 0;
+    for (let i = 0; i < graph.n; i++) {
+      const v = (mask ? mask[i] : 1) & (parts.length === 2 ? parts[1].mask[i] : 1) & (c ? 1 - c.mask[i] : 1);
+      out[i] = v; count += v;
+    }
+    out.count = count;
+    out.categories = parts.reduce((s, x) => s + x.mask.categories, 0);
+    mask = out;
+    if (c) name = (name || "everything") + ` minus ${c.name}`;
+  }
+  return { mask, name };
 };
 
 /**
@@ -305,6 +331,13 @@ const server = createServer(async (req, res) => {
         return json(res, 200, { idx: i, title: graph.titleOf(i).replace(/_/g, " "), indeg: graph.indeg[i] });
       }
 
+      /* One category's place: parents, children, members. */
+      case "/api/category": {
+        const pid = graph.findCategory(q.get("title") ?? "");
+        if (pid < 0) return json(res, 404, { error: `no category "${q.get("title")}"` });
+        return json(res, 200, graph.categoryInfo(pid));
+      }
+
       /* One article's facts, for the card: rank, categories, degrees. */
       case "/api/article": {
         const i = graph.lookup(q.get("title") ?? "");
@@ -382,6 +415,7 @@ const server = createServer(async (req, res) => {
         data.pinned = positionsOf(ids, path);
         data.pathTitles = names;
         data.pathMs = Date.now() - t0;
+        if (w.mask) data.within = { name: w.name, articles: w.mask.count, categories: w.mask.categories };
         return json(res, 200, withSince(q, data));
       }
 
@@ -443,6 +477,7 @@ const server = createServer(async (req, res) => {
         data.path = [String(a), String(b)];
         data.pinned = positionsOf([a, b, ...sel.ids], [a, b]);
         data.common = { cited: sel.cited, citing: sel.citing, shown: sel.ids.length };
+        if (w.mask) data.within = { name: w.name, articles: w.mask.count, categories: w.mask.categories };
         return json(res, 200, withSince(q, data));
       }
 
@@ -456,24 +491,29 @@ const server = createServer(async (req, res) => {
           minLen: minLen(q),
         });
         if (!sel.ids.length) return json(res, 404, { error: "category holds no articles" });
-        return json(res, 200, withSince(q, graph.toVaultData(sel.ids, {
+        const catData = graph.toVaultData(sel.ids, {
           title: `Category: ${String(q.get("title")).replace(/_/g, " ")}`,
           wedgeOf: sel.branch,
           mutual: wantMutual(q),
           group: groupBy(q), size: sizeBy(q),
-        })));
+        });
+        // Where this category sits: its parents, for the way up.
+        catData.category = graph.categoryInfo(pid);
+        return json(res, 200, withSince(q, catData));
       }
 
       case "/api/view/top": {
         const w = within(q);
         if (w.error) return json(res, 404, { error: w.error });
-        return json(res, 200, withSince(q, graph.toVaultData(
+        const topData = graph.toVaultData(
           graph.top(budget(q.get("limit"), 2000), hidden(q), minLen(q), w.mask, rankBy(q)), {
             title: `${WIKI} — ${rankBy(q) === "pagerank" ? "highest PageRank" : "most linked-to"}` +
                    (w.name ? ` within ${w.name}` : ""),
             mutual: wantMutual(q),
             group: groupBy(q), size: sizeBy(q),
-          })));
+          });
+        if (w.mask) topData.within = { name: w.name, articles: w.mask.count, categories: w.mask.categories };
+        return json(res, 200, withSince(q, topData));
       }
 
       default:
