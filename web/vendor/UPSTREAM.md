@@ -16,7 +16,8 @@ receives a plain click on the open button (modifier-clicks still follow the href
 does not clip (rank and categories go there). With `deps.linkWhy(from, to, el)` present, each
 neighbour on the card gets a *?* that opens an element under the row for the host to fill
 (the sentence making the link). `deps.articleActions(label, el)` gets a span in the actions row
-for the host's own buttons, and a node's `mark` ("toread" | "read") is drawn as a halo, and an edge with weight 2 (the host's "new since last month") in gold. `page.css` gained the `.preview`
+for the host's own buttons, and a node's `mark` ("toread" | "read") is drawn as a halo, and an edge with weight 2 (the host's "new since last month") in gold. A `#vg-follow` button beside the camera controls toggles whether selecting an
+article flies the camera to it (`deps.followZoom` initial value, `deps.onFollowZoom` on change). `page.css` gained the `.preview`
 rules beside the card's other styles. The sidebar gained *Export CSV* / *Export JSON* beside *Save PNG*, exporting what the
 disc shows by the planner's own `willShow()` test. A node may carry an optional `size` (0..1);
 when it does, the dot's radius comes from it rather than from the degree, which still

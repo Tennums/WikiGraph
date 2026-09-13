@@ -532,6 +532,10 @@ async function draw({ push = true, fromGame = false } = {}) {
     articleFacts,
     // To read / read on the card.
     articleActions: (label, el) => reading.buttons(label, el),
+    // Whether selecting an article flies the camera to it. The disc is rebuilt on every
+    // draw, so the choice lives here, in the browser, and is handed back each time.
+    followZoom: localStorage.getItem("wikigraph.follow") !== "0",
+    onFollowZoom: (v) => { try { localStorage.setItem("wikigraph.follow", v ? "1" : "0"); } catch {} },
     // "why?" beside a neighbour: the sentence that makes the link, from Kiwix.
     linkWhy: info.reader ? (from, to, el) => {
       el.textContent = "…";

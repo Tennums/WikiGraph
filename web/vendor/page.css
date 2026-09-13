@@ -388,7 +388,7 @@
   .vault-graph #vg-cam button:hover, .vault-graph #vg-mob button:hover { opacity: 1; color: var(--text-1); border-color: var(--border-strong); }
   .vault-graph #vg-cam button:focus-visible, .vault-graph #vg-mob button:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
   .vault-graph #vg-pan { margin-top: 4px; }
-  .vault-graph #vg-pan[aria-pressed="true"], .vault-graph #vg-band[aria-pressed="true"], .vault-graph #vg-sheet[aria-expanded="true"] {
+  .vault-graph #vg-pan[aria-pressed="true"], .vault-graph #vg-follow[aria-pressed="true"], .vault-graph #vg-band[aria-pressed="true"], .vault-graph #vg-sheet[aria-expanded="true"] {
     opacity: .8; color: var(--accent); border-color: var(--accent);
     background: color-mix(in oklab, var(--accent) 12%, var(--surface-2));
   }

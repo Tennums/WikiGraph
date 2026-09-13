@@ -384,6 +384,10 @@ function mountVaultGraph(root, data, deps) {
 
   // github#4
   var panEnabled = deps.panEnabled === false ? false : true;
+  // wikigraph: whether selecting an article (a dot, a neighbour on the card, a search
+  // hit) also flies the camera to it. On by default; off keeps the view where it is.
+  var followEnabled = deps.followZoom === false ? false : true;
+  var onFollowZoom = typeof deps.onFollowZoom === "function" ? deps.onFollowZoom : null;
   var onPanEnabled = typeof deps.onPanEnabled === "function" ? deps.onPanEnabled : null;
 
   // github#23
@@ -5133,6 +5137,7 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {string} id */
   function centerOn(id) {
+    if (!followEnabled) return;
     var d = renderer.getNodeDisplayData(id);
     if (!d) return;
     renderer.getCamera().animate({ x: d.x, y: d.y, ratio: 0.22 }, { duration: 420 });
@@ -5867,6 +5872,14 @@ function mountVaultGraph(root, data, deps) {
     if ($("zin")) $("zin").onclick = function () { zoomBy(1); };
     if ($("zout")) $("zout").onclick = function () { zoomBy(-1); };
     if ($("pan")) $("pan").onclick = function () { setPan(!panEnabled, true); };
+    if ($("follow")) {
+      $("follow").setAttribute("aria-pressed", followEnabled ? "true" : "false");
+      $("follow").onclick = function () {
+        followEnabled = !followEnabled;
+        $("follow").setAttribute("aria-pressed", followEnabled ? "true" : "false");
+        if (onFollowZoom) onFollowZoom(followEnabled);
+      };
+    }
     setPan(panEnabled, false);
     // github#23
     if ($("compact")) $("compact").onclick = function () { setCompactAxis(!compactAxis, true); };
