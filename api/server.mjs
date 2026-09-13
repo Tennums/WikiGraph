@@ -384,6 +384,33 @@ const server = createServer(async (req, res) => {
         return json(res, 200, withSince(q, data));
       }
 
+      /* Articles similar to one, by shared neighbours: co-citation and coupling. The
+         seed is pinned; the score is the dot size unless a lens says otherwise. */
+      case "/api/view/similar": {
+        const seed = graph.lookup(q.get("title") ?? "");
+        if (seed < 0) return json(res, 404, { error: `no article "${q.get("title")}"` });
+        const w = within(q);
+        if (w.error) return json(res, 404, { error: w.error });
+        const t0 = Date.now();
+        const sel = graph.similar(seed, { limit: budget(q.get("limit"), 300) - 1, hide: hidden(q), minLen: minLen(q), within: w.mask });
+        if (sel.ids.length < 2) return json(res, 404, { error: "nothing shares enough links with it under the current filters" });
+        const name = graph.titleOf(seed).replace(/_/g, " ");
+        const data = graph.toVaultData(sel.ids, {
+          title: `Similar to ${name}` + (w.name ? ` · within ${w.name}` : ""),
+          mutual: wantMutual(q), group: groupBy(q), size: sizeBy(q),
+          typeOf: (id) => id === seed ? "the seed"
+            : `${(sel.score.get(id) * 100).toFixed(0)}% · shares ${sel.shared.get(id)} links`,
+        });
+        if (sizeBy(q) === "degree") {
+          const max = sel.score.get(sel.ids[1]) || 1;
+          data.nodes.forEach((node, i) => { node.size = i === 0 ? 1 : Number((sel.score.get(sel.ids[i]) / max).toFixed(3)); });
+        }
+        data.pinned = positionsOf(sel.ids, [seed]);
+        data.similar = { candidates: sel.candidates, degSeed: sel.degSeed, ms: Date.now() - t0 };
+        if (w.mask) data.within = { name: w.name, articles: w.mask.count, categories: w.mask.categories };
+        return json(res, 200, withSince(q, data));
+      }
+
       /* The overlap of two articles: what both link to, and who links to both. The two
          seeds are pinned to the hub; everything else is their common ground. */
       case "/api/view/common": {

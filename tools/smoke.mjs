@@ -306,6 +306,27 @@ test("view: path", async () => {
   assert.equal(miss.status, 404);
 });
 
+test("view: similar", async () => {
+  const r = await get(`/api/view/similar?title=Belgium&limit=100&${HIDE}`);
+  if (!FACTS && r.status === 404) return;
+  assert.equal(r.status, 200);
+  checkView(r.body, { minNodes: 20 });
+  assert.equal(r.body.nodes[Number(r.body.pinned[0])].label, "Belgium", "the seed is pinned");
+  assert.equal(r.body.nodes[0].type, "the seed");
+  assert.ok(r.body.nodes.slice(1).every((n) => /^\d+% · shares \d+ links$/.test(n.type)), "scores as types");
+  assert.equal(r.body.nodes[0].size, 1);
+  assert.ok(r.body.nodes[1].size === 1 && r.body.nodes.at(-1).size <= r.body.nodes[1].size, "score as size, best first");
+  assert.ok(r.body.similar.candidates > 100 && r.body.similar.ms < 2000, `candidates ${r.body.similar.candidates} in ${r.body.similar.ms} ms`);
+  if (FACTS) {
+    const top = r.body.nodes.slice(1, 8).map((n) => n.label);
+    assert.ok(top.includes("Netherlands") && top.includes("Luxembourg"), `neighbours first: ${top}`);
+    const e = await get(`/api/view/similar?title=Albert%20Einstein&limit=50&${HIDE}`);
+    assert.ok(e.body.nodes.slice(1, 10).some((n) => /Bohr|Heisenberg|Lorentz|Penrose/.test(n.label)), "physicists for Einstein");
+  }
+  const miss = await get("/api/view/similar?title=Nope%20Nope%20Nope");
+  assert.equal(miss.status, 404);
+});
+
 test("view: common ground", async () => {
   const r = await get(`/api/view/common?from=Belgium&to=Netherlands&limit=800&${HIDE}`);
   if (!FACTS && r.status === 404) return;

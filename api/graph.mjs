@@ -597,6 +597,63 @@ export class WikiGraph {
   }
 
   /**
+   * Articles similar to `seed` by the company they keep: the same articles link to
+   * both (co-citation), and both link to the same articles (bibliographic coupling).
+   * The "related" question that direct links miss -- two physicists who never cite
+   * each other but are named in the same two hundred articles.
+   *
+   * Counted from the seed outward rather than candidate by candidate: for every z
+   * that links to the seed, every article z also links to gets a point; for every w
+   * the seed links to, every article that also links to w gets a point. The points
+   * are the sizes of the shared neighbour sets, and the score is Jaccard over the
+   * combined in+out neighbour sets, |shared| / (deg(seed) + deg(y) - |shared|).
+   *
+   * Hubs are the cost: an article linking to the seed may have 3,000 out-links, and
+   * United States has half a million in-links. So the neighbours are taken smallest
+   * degree first -- an article with thirty links that links to Belgium says more about
+   * Belgium than a list with three thousand -- and the walk stops at `budget` points.
+   * The counts are then lower bounds for whatever was left out, which only ever
+   * penalises the hubs, which is the right way round.
+   */
+  similar(seed, { limit = 300, hide = [], minLen = 0, within = null, budget = 400_000 } = {}) {
+    const ok = this.allow(hide, minLen, within);
+    const points = new Map();
+    let spent = 0;
+    // (list of neighbours, the degree that decides their order, the list to walk from each)
+    const walk = (nbrs, degOf, from) => {
+      const order = Array.from(nbrs).sort((a, b) => degOf(a) - degOf(b));
+      for (const z of order) {
+        if (spent >= budget) return;
+        const list = from(z);
+        spent += list.length;
+        for (const y of list) {
+          if (y === seed) continue;
+          points.set(y, (points.get(y) ?? 0) + 1);
+        }
+      }
+    };
+    const outDeg = (i) => this.out.degree(i);
+    const inDeg = (i) => this.indeg[i];
+    walk(this.in.neighbours(seed), outDeg, (z) => this.out.neighbours(z));   // co-citation
+    walk(this.out.neighbours(seed), inDeg, (w) => this.in.neighbours(w));     // coupling
+    const degSeed = this.indeg[seed] + this.out.degree(seed);
+    const scored = [];
+    for (const [y, shared] of points) {
+      if (shared < 2 || !ok(y)) continue;
+      const degY = this.indeg[y] + this.out.degree(y);
+      scored.push([y, shared / (degSeed + degY - shared), shared]);
+    }
+    scored.sort((a, b) => b[1] - a[1] || b[2] - a[2]);
+    const top = scored.slice(0, limit);
+    return {
+      ids: [seed, ...top.map((t) => t[0])],
+      score: new Map(top.map((t) => [t[0], t[1]])),
+      shared: new Map(top.map((t) => [t[0], t[2]])),
+      degSeed, candidates: scored.length, spent,
+    };
+  }
+
+  /**
    * Shortest link path from `a` to `b`: the "six degrees of Wikipedia" question.
    *
    * Bidirectional: forward from `a` along out-links, backward from `b` along in-links,

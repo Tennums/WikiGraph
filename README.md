@@ -27,6 +27,7 @@ thousand articles chosen for a reason:
 | **What it links to** | the same, following out-links only | subject area |
 | **Path between two** | the shortest chain of links, pinned to the hub, each step with a slice of its neighbourhood | subject area |
 | **Common ground of two** | what both link to, and who links to both — the overlap rather than the chain; both seeds pinned | subject area |
+| **Similar to** | articles that keep the same company — the same articles link to both, both link to the same articles — by Jaccard over shared neighbours; the seed pinned, the score as dot size | subject area |
 | **Category tree** | everything under a category, N levels deep | direct subcategories |
 | **Most linked-to** | the top articles by in-degree | subject area |
 | **Reading order for** | *experimental* — what an article assumes, from lead paragraphs: its own lead links, and what two or more of those articles' leads share; drawn as a disc with the article pinned, listed as an order under the bar | subject area |
@@ -95,6 +96,18 @@ section. On simplewiki: *Mass ×5, Particle ×4, Energy ×4, Speed of light, Sci
 *Mathematics, Physics, Chemistry, Atom, Electron …* then the article. Some forty fetches,
 cached; the set is drawn through `/api/view/set` with the article pinned. Whether the
 order convinces is a judgement made on screen, which is why it is marked experimental.
+
+**Similar, without a link between them.** *Similar to Belgium* puts the Netherlands,
+Denmark and Luxembourg first; *Similar to Albert Einstein* Penrose, Lorentz, Bohr and
+Heisenberg; *Similar to Quantum mechanics* its interpretations and the wave function.
+Co-citation (the same articles link to both) plus coupling (both link to the same
+articles), scored as Jaccard over the combined neighbour sets. Counted from the seed
+outward — for every article linking to the seed, everything it also links to gets a
+point, and the other way round — smallest neighbours first, since an article with thirty
+links that links to Belgium says more about Belgium than a list with three thousand, and
+stopped at 400,000 points, which leaves hubs with lower bounds and nothing else affected.
+Under 100 ms on simplewiki, *United States* included (which comes out similar to *City*,
+*Town* and *U.S. state* — the company it keeps).
 
 **Disambiguation pages are a choice, not a hit.** Type "Mercury" and the box offers
 *Mercury (element) · Science*, *Mercury (planet)*, *Freddie Mercury*, *Mercury

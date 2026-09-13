@@ -231,6 +231,7 @@
     <option value="out">What it links to</option>
     <option value="path">Path between two</option>
     <option value="common">Common ground of two</option>
+    <option value="similar">Similar to</option>
     <option value="category">Category tree</option>
     <option value="top">Most linked-to</option>
     <option value="text" id="viewText">Articles that mention</option>
@@ -503,6 +504,7 @@ async function draw({ push = true, fromGame = false } = {}) {
     : view === "category" ? `api/view/category?title=${t}&limit=${limit}&depth=3`
     : view === "path" ? `api/view/path?from=${t}&to=${encodeURIComponent($("q2").value.trim())}&limit=${limit}`
     : view === "common" ? `api/view/common?from=${t}&to=${encodeURIComponent($("q2").value.trim())}&limit=${limit}`
+    : view === "similar" ? `api/view/similar?title=${t}&limit=${limit}`
     : `api/view/neighborhood?title=${t}&limit=${limit}&hops=${$("hops").value}` +
       `&direction=${view === "neighborhood" ? "both" : view}`) + hide;
 
@@ -629,7 +631,8 @@ async function draw({ push = true, fromGame = false } = {}) {
   dabStrip(data.dab);
   saved.drawn(data.vault);
 
-  status((data.since ? `${data.since.newEdges.toLocaleString()} links new since ${data.since.build} · ` : "") +
+  status((data.similar ? `${data.similar.candidates.toLocaleString()} articles share links with it · ` : "") +
+         (data.since ? `${data.since.newEdges.toLocaleString()} links new since ${data.since.build} · ` : "") +
          (data.readingHidden ? `${data.readingHidden} hidden by reading state · ` : "") +
          (data.textHits !== undefined ? `${data.textHits.toLocaleString()} articles mention it · ` +
            (data.set.filtered ? `${data.set.filtered} filtered · ` : "") : "") +
@@ -1618,7 +1621,8 @@ const syncControls = () => {
   $("q2Label").textContent = view === "common" ? "×" : "→";
   $("q").placeholder = view === "category" ? "Physics (category name)"
                      : view === "text" ? "Antwerp (words in the text)"
-                     : view === "order" ? "Quantum mechanics (what to read first)" : "Physics";
+                     : view === "order" ? "Quantum mechanics (what to read first)"
+                     : view === "similar" ? "Belgium (by shared links)" : "Physics";
   $("within").disabled = $("withinLabel").hidden = view === "category";
   $("within").hidden = view === "category";
 };
