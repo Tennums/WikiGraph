@@ -10,7 +10,7 @@ import { createServer, request as httpRequest } from "node:http";
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { basename, extname, join, normalize } from "node:path";
-import { WikiGraph, KIND_NAMES } from "./graph.mjs";
+import { WikiGraph, PreviousBuild, KIND_NAMES } from "./graph.mjs";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const WIKI = process.env.WIKI ?? "simplewiki";
@@ -67,6 +67,25 @@ for (const ext of ["csr", "rcsr", "db", "kind"]) {
 const graph = new WikiGraph(join(GRAPH_DIR, `${WIKI}.csr`), join(GRAPH_DIR, `${WIKI}.rcsr`),
                             join(GRAPH_DIR, `${WIKI}.db`), join(GRAPH_DIR, `${WIKI}.kind`),
                             join(GRAPH_DIR, `${WIKI}.search.db`), join(GRAPH_DIR, `${WIKI}.rank`));
+// The build before this one, when the refresh has left it beside `current`: the dated
+// directory just below the current one by name. Only its in-link graph and title
+// table are opened (~60 MB resident for enwiki); everything "since last month" -- the
+// card's arrived and left in-links, the new-links lens -- comes from comparing the two.
+graph.previous = null;
+if (BUILD) {
+  const dated = readdirSync(GRAPH_ROOT).filter((d) => /^\d{8}$/.test(d) && d < BUILD).sort();
+  const prevName = dated[dated.length - 1];
+  const prevDir = prevName && join(GRAPH_ROOT, prevName);
+  if (prevDir && existsSync(join(prevDir, `${WIKI}.rcsr`)) && existsSync(join(prevDir, `${WIKI}.db`))) {
+    try {
+      graph.previous = new PreviousBuild(prevDir, WIKI, prevName);
+      console.log(`wikigraph: previous build ${prevName} opened for "since last month"`);
+    } catch (e) {
+      console.log(`wikigraph: previous build ${prevName} unusable (${e.message}); no "since" comparisons`);
+    }
+  }
+}
+
 if (!graph.rank) {
   console.log(`wikigraph: no ${WIKI}.rank -- ranking by in-degree only; add PageRank with\n` +
               `  docker compose --profile ingest run --rm ingest --wiki ${WIKI} --rank-only`);
@@ -146,6 +165,20 @@ const sizeBy = (q) => {
        : ["indegree", "length"].includes(v) ? v : "degree";
 };
 
+/**
+ * `since=1` -> the new-links lens: edges that did not exist in the previous build get
+ * weight 2, which the page draws brighter, and the count goes in `since`. Applied to
+ * a finished view's data; a no-op without a previous build.
+ */
+const wantSince = (q) => ["1", "true", "yes"].includes(q.get("since") ?? "");
+const withSince = (q, data) => {
+  if (!wantSince(q) || !graph.previous) return data;
+  const fresh = graph.newEdges(data.nodes.map((n) => n.label), data.edges);
+  for (const k of fresh) data.edges[k].w = 2;
+  data.since = { build: graph.previous.name, newEdges: fresh.size };
+  return data;
+};
+
 /** `mutual=1` -> draw and follow only links that go both ways. */
 const wantMutual = (q) => ["1", "true", "yes"].includes(q.get("mutual") ?? "");
 
@@ -196,6 +229,7 @@ const server = createServer(async (req, res) => {
         return json(res, 200, {
           ...graph.meta,
           build: BUILD,
+          previous: graph.previous?.name ?? null,
           maxNodes: MAX_NODES,
           kinds: Object.fromEntries(KIND_NAMES.map((k, i) => [k, graph.kindCounts[i]])),
           search: graph.fts ? "fulltext" : "prefix",
@@ -245,7 +279,7 @@ const server = createServer(async (req, res) => {
         }
         data.set = { given: body.titles.length, drawn: ids.length, unresolved, filtered };
         if (w.mask) data.within = { name: w.name, articles: w.mask.count, categories: w.mask.categories };
-        return json(res, 200, data);
+        return json(res, 200, withSince(q, data));
       }
 
       case "/api/search": {
@@ -296,7 +330,7 @@ const server = createServer(async (req, res) => {
         // the one dot the view is about should never have to be found on the rim.
         data.pinned = positionsOf(sel.ids, [seed]);
         if (w.mask) data.within = { name: w.name, articles: w.mask.count, categories: w.mask.categories };
-        return json(res, 200, data);
+        return json(res, 200, withSince(q, data));
       }
 
       /* The shortest chain of links between two articles, drawn in context: the path
@@ -337,7 +371,7 @@ const server = createServer(async (req, res) => {
         data.pinned = positionsOf(ids, path);
         data.pathTitles = names;
         data.pathMs = Date.now() - t0;
-        return json(res, 200, data);
+        return json(res, 200, withSince(q, data));
       }
 
       /* The overlap of two articles: what both link to, and who links to both. The two
@@ -371,7 +405,7 @@ const server = createServer(async (req, res) => {
         data.path = [String(a), String(b)];
         data.pinned = positionsOf([a, b, ...sel.ids], [a, b]);
         data.common = { cited: sel.cited, citing: sel.citing, shown: sel.ids.length };
-        return json(res, 200, data);
+        return json(res, 200, withSince(q, data));
       }
 
       case "/api/view/category": {
@@ -384,24 +418,24 @@ const server = createServer(async (req, res) => {
           minLen: minLen(q),
         });
         if (!sel.ids.length) return json(res, 404, { error: "category holds no articles" });
-        return json(res, 200, graph.toVaultData(sel.ids, {
+        return json(res, 200, withSince(q, graph.toVaultData(sel.ids, {
           title: `Category: ${String(q.get("title")).replace(/_/g, " ")}`,
           wedgeOf: sel.branch,
           mutual: wantMutual(q),
           group: groupBy(q), size: sizeBy(q),
-        }));
+        })));
       }
 
       case "/api/view/top": {
         const w = within(q);
         if (w.error) return json(res, 404, { error: w.error });
-        return json(res, 200, graph.toVaultData(
+        return json(res, 200, withSince(q, graph.toVaultData(
           graph.top(budget(q.get("limit"), 2000), hidden(q), minLen(q), w.mask, rankBy(q)), {
             title: `${WIKI} — ${rankBy(q) === "pagerank" ? "highest PageRank" : "most linked-to"}` +
                    (w.name ? ` within ${w.name}` : ""),
             mutual: wantMutual(q),
             group: groupBy(q), size: sizeBy(q),
-          }));
+          })));
       }
 
       default:

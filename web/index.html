@@ -38,6 +38,9 @@
   #mutualLabel { display: inline-flex; gap: 4px; align-items: center; cursor: pointer;
                  white-space: nowrap; padding-left: 10px; border-left: 1px solid #2c313a; }
   #mutualLabel input { margin: 0; accent-color: #9fd0ff; }
+  #sinceLabel { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; white-space: nowrap; }
+  #sinceLabel[hidden] { display: none; }
+  #sinceLabel input { margin: 0; accent-color: #e0b84a; }
   #withinLabel { padding-left: 10px; border-left: 1px solid #2c313a; }
   #within { width: 160px; }
   #status { margin-left: auto; color: #8b93a1; }
@@ -270,6 +273,10 @@
     <input type="checkbox" id="mutual"> mutual links only
   </label>
 
+  <label id="sinceLabel" hidden title="Links that did not exist in the previous month's build are drawn in gold. Needs two builds on disk (the monthly refresh keeps them).">
+    <input type="checkbox" id="since"> new links
+  </label>
+
   <label for="within" id="withinLabel" title="Only articles filed under this category or its subcategories, three levels down. Seeds and path endpoints are always allowed.">within</label>
   <input type="text" id="within" list="cathits" placeholder="any category">
   <datalist id="cathits"></datalist>
@@ -394,6 +401,7 @@ function readHash() {
     for (const b of hideBoxes()) b.checked = on.has(b.value);
   }
   $("mutual").checked = h.get("mutual") === "1";
+  $("since").checked = h.get("since") === "1";
   if (!h.has("group")) $("group").value = "topic";
   if (!h.has("rank")) $("rank").value = "indegree";
   if (!h.has("size")) $("size").value = "degree";
@@ -419,6 +427,7 @@ function writeHash(push) {
   }
   h.set("hide", hideValue());
   if ($("mutual").checked) h.set("mutual", "1");
+  if ($("since").checked) h.set("since", "1");
   const next = "#" + h.toString();
   if (next === location.hash) return;
   if (push) history.pushState(null, "", next); else history.replaceState(null, "", next);
@@ -442,7 +451,7 @@ async function draw({ push = true, fromGame = false } = {}) {
   const t = encodeURIComponent(q);
   const w = $("within").value.trim();
   const hide = `&hide=${hideValue()}&minlen=${$("minlen").value}&group=${$("group").value}&rank=${$("rank").value}&size=${$("size").value}` +
-               ($("mutual").checked ? "&mutual=1" : "") +
+               ($("mutual").checked ? "&mutual=1" : "") + ($("since").checked ? "&since=1" : "") +
                (w && view !== "category" ? `&within=${encodeURIComponent(w)}` : "");
   const url = (
     view === "top" ? `api/view/top?limit=${limit}`
@@ -559,7 +568,8 @@ async function draw({ push = true, fromGame = false } = {}) {
   pathWhy(data.pathTitles);
   saved.drawn(data.vault);
 
-  status((data.readingHidden ? `${data.readingHidden} hidden by reading state · ` : "") +
+  status((data.since ? `${data.since.newEdges.toLocaleString()} links new since ${data.since.build} · ` : "") +
+         (data.readingHidden ? `${data.readingHidden} hidden by reading state · ` : "") +
          (data.textHits !== undefined ? `${data.textHits.toLocaleString()} articles mention it · ` +
            (data.set.filtered ? `${data.set.filtered} filtered · ` : "") : "") +
          (data.within ? `${data.within.articles.toLocaleString()} articles under ${data.within.name} · ` : "") +
@@ -918,6 +928,51 @@ async function articleFacts(label, el) {
       more.textContent = `+${cats.length - LIMIT} more`;
       more.addEventListener("click", () => { more.remove(); cats.slice(LIMIT).forEach((c) => box.append(chip(c))); });
       box.append(more);
+    }
+    el.append(box);
+  }
+
+  // Since the previous build: in-links that arrived and left. Counts on the line,
+  // titles behind a toggle; an arrival on the disc selects its dot.
+  const sn = f.since;
+  if (sn) {
+    const box = document.createElement("div");
+    box.className = "since";
+    const head = document.createElement("button");
+    head.className = "more";
+    const plus = sn.gainedCount, minus = sn.lostCount;
+    head.textContent = !sn.old ? `new since ${sn.build}`
+      : plus || minus ? `since ${sn.build}: ${plus ? `+${plus.toLocaleString()} in-link${plus === 1 ? "" : "s"}` : ""}${plus && minus ? ", " : ""}${minus ? `−${minus.toLocaleString()} gone` : ""}`
+      : `unchanged since ${sn.build}`;
+    box.append(head);
+    if (sn.old && (plus || minus)) {
+      const list = document.createElement("div");
+      list.hidden = true;
+      const group = (name, titles, count, cls) => {
+        if (!titles.length) return;
+        const h = document.createElement("div"); h.className = "line";
+        h.innerHTML = `<b>${name}</b>` + (count > titles.length ? ` (first ${titles.length} of ${count.toLocaleString()})` : "");
+        list.append(h);
+        const wrap = document.createElement("div");
+        for (const t of titles) {
+          const c = document.createElement("span");
+          c.className = `cat ${cls}`;
+          const b = document.createElement("button");
+          b.textContent = t;
+          const onDisc = disc.labels.has(t);
+          b.title = onDisc ? "On the disc — select it" : "Not on this disc — draw around it";
+          b.addEventListener("click", () => {
+            if (onDisc) disc.api()?.select(t);
+            else { $("view").value = "neighborhood"; $("q").value = t; syncControls(); draw(); }
+          });
+          c.append(b); wrap.append(c);
+        }
+        list.append(wrap);
+      };
+      group("arrived", sn.gained, sn.gainedCount, "gained");
+      group("left", sn.lost, sn.lostCount, "lost");
+      head.addEventListener("click", () => { list.hidden = !list.hidden; });
+      box.append(list);
     }
     el.append(box);
   }
@@ -1372,6 +1427,10 @@ for (const b of hideBoxes()) {
   b.addEventListener("change", () => draw());
 }
 $("mutual").addEventListener("change", () => draw());
+$("since").addEventListener("change", () => draw());
+// "Since last month" needs the previous build beside the current one; without it the
+// checkbox would be a promise the server cannot keep.
+if (info.previous) $("sinceLabel").hidden = false;
 $("minlen").addEventListener("change", () => draw());
 $("group").addEventListener("change", () => draw());
 $("rank").addEventListener("change", () => draw());

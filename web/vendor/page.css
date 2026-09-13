@@ -630,6 +630,11 @@
   }
   .vault-graph #vg-detail .facts .cat button:hover { color: var(--text); background: var(--surface-3, rgba(255,255,255,.06)); }
   .vault-graph #vg-detail .facts .more { font-size: 10px; color: var(--text-3); background: none; border: 0; cursor: pointer; padding: 1px 4px; }
+  .vault-graph #vg-detail .facts .since { margin-top: 4px; }
+  .vault-graph #vg-detail .facts .since > .more { padding-left: 0; color: #e0b84a; }
+  .vault-graph #vg-detail .facts .since .line { margin: 4px 0 2px; }
+  .vault-graph #vg-detail .facts .cat.gained { border-color: #8a6d1f; }
+  .vault-graph #vg-detail .facts .cat.lost { border-color: #6b3a3a; opacity: .7; }
   .vault-graph #vg-detail .actions {
     display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px;
   }

@@ -98,8 +98,58 @@ function intersectSorted(a, b) {
 const ORGANISING_CAT = /(_stubs?|_templates|-related_lists|_by_[a-z_]+|_redirects)$|^(Wikipedia|WikiProject|Redirects|Stubs?)_|_articles(_|$)/;
 
 /** Node kinds, as the ingest writes them into <wiki>.kind. */
+const label_ = (t) => String(t).replace(/_/g, " ");
+
 export const KIND = { article: 0, list: 1, date: 2, dab: 3, infra: 4 };
 export const KIND_NAMES = ["article", "list", "date", "dab", "infra"];
+
+/**
+ * The build before this one, for "what changed since": its in-link graph and its title
+ * table, nothing more. Articles are matched by title -- each build numbers its own --
+ * through the old database's title index, one lookup per article asked about, rather
+ * than a seven-million-entry map held in memory for a question asked now and then.
+ */
+export class PreviousBuild {
+  constructor(dir, wiki, name) {
+    this.name = name;
+    this.in = new Csr(`${dir}/${wiki}.rcsr`);
+    this.db = new DatabaseSync(`${dir}/${wiki}.db`, { readOnly: true });
+    this._idx = this.db.prepare("SELECT idx FROM node WHERE title = ?");
+    this._cache = new Map();   // title -> old idx or -1, for the lens's many lookups
+  }
+
+  /** The article's index in the old build, or -1 if it was not there. */
+  idxOf(title) {
+    let i = this._cache.get(title);
+    if (i === undefined) {
+      const r = this._idx.get(title);
+      i = r ? Number(r.idx) : -1;
+      if (this._cache.size > 50000) this._cache.clear();
+      this._cache.set(title, i);
+    }
+    return i;
+  }
+
+  /** Titles of the old in-neighbours of an old index. */
+  inTitles(oldIdx) {
+    const ids = this.in.neighbours(oldIdx);
+    const out = [];
+    for (let at = 0; at < ids.length; at += 5000) {
+      const chunk = Array.from(ids.subarray(at, at + 5000));
+      const ph = chunk.map(() => "?").join(",");
+      for (const r of this.db.prepare(`SELECT title FROM node WHERE idx IN (${ph})`).all(...chunk)) out.push(String(r.title));
+    }
+    return out;
+  }
+
+  /** Did `from` link to `to` in the old build, given their old indices? */
+  hadLink(from, to, inOfTo) {
+    const arr = inOfTo ?? this.in.neighbours(to);
+    let lo = 0, hi = arr.length - 1;
+    while (lo <= hi) { const mid = (lo + hi) >>> 1; if (arr[mid] < from) lo = mid + 1; else if (arr[mid] > from) hi = mid - 1; else return true; }
+    return false;
+  }
+}
 
 export class WikiGraph {
   /** @param {string} csrPath @param {string} rcsrPath @param {string} dbPath
@@ -329,7 +379,62 @@ export class WikiGraph {
       topic: r.topic ? String(r.topic) : null,
       rank: this.rankOf(idx), of: this.n,
       categories: cats,
+      since: this.since(idx),
     };
+  }
+
+  /**
+   * What changed around an article since the previous build: in-links that arrived
+   * and left, as titles. Null without a previous build; `old: false` when the article
+   * itself is new. A rename shows as everything lost here and everything gained on
+   * the new title, which is what happened to the links.
+   */
+  since(idx) {
+    const prev = this.previous;
+    if (!prev) return null;
+    const title = this.titleOf(idx);
+    const oldIdx = prev.idxOf(title);
+    if (oldIdx < 0) return { build: prev.name, old: false, gained: [], lost: [], gainedCount: this.indeg[idx], lostCount: 0 };
+    const was = new Set(prev.inTitles(oldIdx));
+    const nowIds = this.in.neighbours(idx);
+    const now = new Map();   // title -> current idx
+    for (let at = 0; at < nowIds.length; at += 5000) {
+      const chunk = Array.from(nowIds.subarray(at, at + 5000));
+      const ph = chunk.map(() => "?").join(",");
+      for (const r of this.db.prepare(`SELECT idx, title FROM node WHERE idx IN (${ph})`).all(...chunk)) now.set(String(r.title), Number(r.idx));
+    }
+    const gained = [...now.keys()].filter((t) => !was.has(t));
+    const lost = [...was].filter((t) => !now.has(t));
+    // The most linked-to first, so a hub's hundred arrivals lead with the ones that matter.
+    const byDeg = (a, b) => this.indeg[now.get(b)] - this.indeg[now.get(a)];
+    const CAP = 150;
+    return {
+      build: prev.name, old: true,
+      gained: gained.sort(byDeg).slice(0, CAP).map(label_), lost: lost.slice(0, CAP).map(label_),
+      gainedCount: gained.length, lostCount: lost.length,
+      then: was.size, now: now.size,
+    };
+  }
+
+  /**
+   * The lens: which of a view's edges did not exist in the previous build. Given the
+   * node titles in view order and the undirected edges as positions, returns the set
+   * of edge indices that are new -- no link either way between the two back then.
+   */
+  newEdges(labels, edges) {
+    const prev = this.previous;
+    if (!prev) return null;
+    const oldIdx = labels.map((t) => prev.idxOf(t.replace(/ /g, "_")));
+    const inOf = new Map();   // old idx -> old in-neighbours, read once per node
+    const ins = (i) => { let a = inOf.get(i); if (!a) { a = prev.in.neighbours(i); inOf.set(i, a); } return a; };
+    const out = new Set();
+    edges.forEach((e, k) => {
+      const a = oldIdx[e.s], b = oldIdx[e.t];
+      if (a < 0 || b < 0) { out.add(k); return; }         // one end did not exist: new
+      if (prev.hadLink(a, b, ins(b)) || prev.hadLink(b, a, ins(a))) return;
+      out.add(k);
+    });
+    return out;
   }
 
   /**

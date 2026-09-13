@@ -118,6 +118,18 @@ way round, a neighbour clicked on the card scrolls the article to the sentence w
 link is made and flashes it. The marks are recomputed on every draw, since they are the
 intersection of the two: redraw around Physics and *Belgium* has 34 left.
 
+**What changed since last month, per article.** When the refresh has left the previous
+dated build beside `current`, the API opens its in-link graph and title table too (~60 MB
+resident for enwiki; articles matched by title through the old database's index, one
+lookup per question, not a seven-million-entry map). The card then says *since 20260801:
++375 in-links, −2 gone* — *Palestine*, the month *Palestine (country)* was folded into it —
+and opens to the titles, arrivals first by importance; one on the disc selects its dot, one
+off it draws around it. *New links* in the bar is the same as a lens: every drawn link that
+did not exist in the previous build, either way round, is gold and thicker — *Around Ice
+hockey* lights up with the new season's players — and the status line counts them. A
+renamed article is all departures under the old title and all arrivals under the new,
+which is what happened to the links. Without a second build the checkbox is not offered.
+
 **The disc as a table.** *Table* in the bar lays the same articles over the disc as
 sortable rows — title, in-links over the wiki, links on the disc, words, wedge, hop or role,
 kind, reading state, last edited — with a text filter and *Copy as Markdown* (a Markdown
@@ -420,7 +432,8 @@ once at startup, so the restart is what switches — `restart: unless-stopped` b
 in a few seconds, and the script prints what it is serving once healthy.
 
 Old builds are kept until deleted by hand; a simplewiki build is 250 MB, an enwiki one
-about 8 GB. The ZIM is on its own cadence (Kiwix publishes every few months) and stays
+about 8 GB. Keep at least the one before `current`: the API opens it for *what changed
+since last month* (the card's arrived and left in-links, the *new links* lens). The ZIM is on its own cadence (Kiwix publishes every few months) and stays
 manual: `fetch-zim.sh`, then `ZIM_BOOK` in `.env`.
 
 ### Behind Caddy

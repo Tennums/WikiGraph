@@ -4361,7 +4361,7 @@ function mountVaultGraph(root, data, deps) {
     ctx.fillText(data.label, data.x + data.size + 5, data.y + n / 3);
   }
 
-  var MARK_TOREAD = "#ffd166", MARK_READ = "#6f8f7a";
+  var MARK_TOREAD = "#ffd166", MARK_READ = "#6f8f7a", EDGE_NEW = "#e0b84a";
   /** @param {string} id @param {NodeAttrs} a @returns {NodeDisplayData & { haloColor?: string }} */
   function nodeStyle(id, a) {
         var r = /** @type {NodeDisplayData & { haloColor?: string }} */ (Object.assign({}, a));
@@ -4816,17 +4816,22 @@ function mountVaultGraph(root, data, deps) {
                                      graph.getNodeAttributes(x[1]));
         }
         r.color = THEME.edge;
+        // wikigraph: a link with weight 2 is one the host marked as new (absent in the
+        // previous build); it is drawn in gold and a little thicker, and keeps its
+        // colour under focus so the lens survives a hover.
+        var isNew = (a.weight || 1) >= 2;
+        if (isNew) { r.color = EDGE_NEW; r.size = (a.size || 1) * 1.8; r.zIndex = 1; }
         var focus = focusSet();
         if (state.query) { r.color = THEME.dim; return capEdge(r, a); }
         if (focus) {
           // github#43
           var ht = hoverAmount(), base = a.size || 1;
           if (focus[x[0]] && focus[x[1]]) {
-            r.color = mixHex(THEME.edge, THEME.edgeHi, ht);
+            r.color = isNew ? EDGE_NEW : mixHex(THEME.edge, THEME.edgeHi, ht);
             r.size = base + (EDGE_SIZE_LIT - base) * ht;
             r.zIndex = 2;
           } else {
-            r.color = mixHex(THEME.edge, THEME.dim, ht);
+            r.color = mixHex(isNew ? EDGE_NEW : THEME.edge, THEME.dim, ht);
             r.zIndex = 0;
           }
         }
