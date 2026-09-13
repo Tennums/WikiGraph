@@ -98,6 +98,16 @@ section. On simplewiki: *Mass ×5, Particle ×4, Energy ×4, Speed of light, Sci
 cached; the set is drawn through `/api/view/set` with the article pinned. Whether the
 order convinces is a judgement made on screen, which is why it is marked experimental.
 
+**Keys, and a palette.** `?` lists them: `/` the article box, `[` `]` back and forward
+along the walk, `r` the selected article beside the disc, `t` the table, `f` zoom-to-article
+on or off, `Esc` closes the nearest open thing (palette, list, table, reader, strips, in
+that order) — none of them while typing. `Ctrl`/`⌘`+`K` opens the palette: one box that
+takes an article name (with a disambiguation page's options in front of the page itself)
+or a view in words — *around belgium*, *similar einstein*, *category physics*, *mentions
+antwerp*, *top*, and *path cheese black hole*, which is resolved by trying each split of
+the words until both halves are articles. Saved views and the reading list are in it too,
+by title. Enter draws.
+
 **A pasted list is a view.** *These articles* takes a textarea: one title per line, or
 Markdown — list markers and checkboxes stripped, a link's text taken over its URL, a
 trailing "— first sentence" cut — which is exactly what *Copy as Markdown* writes, so the

@@ -53,6 +53,29 @@
   #status { margin-left: auto; color: #8b93a1; }
   #status.err { color: #ff8b8b; }
 
+  /* Overlays: the keys sheet and the palette, centred over everything. */
+  .overlay { position: fixed; inset: 0; z-index: 40; background: rgba(8, 9, 12, .55);
+             display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; }
+  .overlay[hidden] { display: none; }
+  .overlay .sheet { width: min(640px, 92vw); background: #1b1e24; color: #e8e8ea; border: 1px solid #333944;
+                    border-radius: 8px; box-shadow: 0 16px 48px rgba(0,0,0,.6); padding: 12px 14px; }
+  #keys h3 { margin: 0 0 8px; font-size: 14px; }
+  #keys table { border-collapse: collapse; font-size: 13px; }
+  #keys td { padding: 4px 10px 4px 0; vertical-align: top; }
+  #keys td:first-child { white-space: nowrap; color: #c4c9d2; }
+  #keys p { margin: 8px 0 0; color: #8b93a1; font-size: 12px; }
+  kbd { font: 12px ui-monospace, Menlo, monospace; background: #23272f; border: 1px solid #333944; border-bottom-width: 2px;
+        border-radius: 4px; padding: 1px 5px; color: #e8e8ea; }
+  #paletteInput { width: 100%; box-sizing: border-box; font-size: 15px; padding: 8px 10px; }
+  #paletteList { list-style: none; margin: 8px 0 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+  #paletteList li { display: flex; align-items: baseline; gap: 10px; padding: 6px 10px; border-radius: 5px; cursor: pointer; }
+  #paletteList li.on, #paletteList li:hover { background: #23272f; }
+  #paletteList li .k { flex: none; width: 92px; font-size: 11px; color: #8b93a1; text-transform: uppercase; letter-spacing: .05em; }
+  #paletteList li .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #paletteList li .m { color: #8b93a1; font-size: 12px; white-space: nowrap; }
+  #paletteList li.none { color: #8b93a1; font-style: italic; cursor: default; }
+  #paletteHint { margin-top: 8px; color: #8b93a1; font-size: 11px; }
+
   /* Saved views: a star that saves what is on screen, a list that brings one back. */
   #star { padding: 4px 7px; }
   #star.on { color: #ffd166; }
@@ -333,6 +356,31 @@
   <datalist id="cathits"></datalist>
 
   <span id="status">loading…</span>
+</div>
+
+<div id="keys" class="overlay" hidden>
+  <div class="sheet">
+    <h3>Keys</h3>
+    <table>
+      <tr><td><kbd>Ctrl</kbd>/<kbd>&#8984;</kbd>+<kbd>K</kbd></td><td>the palette: an article, or a view in words (<i>path cheese black hole</i>, <i>similar einstein</i>, <i>top</i>)</td></tr>
+      <tr><td><kbd>/</kbd></td><td>the article box</td></tr>
+      <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>back and forward along the walk (the breadcrumbs)</td></tr>
+      <tr><td><kbd>r</kbd></td><td>read the selected article beside the disc, or close the panel</td></tr>
+      <tr><td><kbd>t</kbd></td><td>the table</td></tr>
+      <tr><td><kbd>f</kbd></td><td>zoom to the selected article on or off</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>close whatever is open: palette, list, table, reader, strips</td></tr>
+      <tr><td><kbd>?</kbd></td><td>this list</td></tr>
+    </table>
+    <p>None of them while typing in a box.</p>
+  </div>
+</div>
+
+<div id="palette" class="overlay" hidden>
+  <div class="sheet">
+    <input type="text" id="paletteInput" placeholder="An article, or: around belgium · path cheese black hole · similar einstein · category physics · mentions antwerp · top" autocomplete="off" spellcheck="false">
+    <ul id="paletteList"></ul>
+    <div id="paletteHint">&#8593;&#8595; choose · Enter draws · Esc closes</div>
+  </div>
 </div>
 
 <div id="savedPanel" hidden>
@@ -1510,6 +1558,17 @@ function trailRecord(view, q) {
   renderTrail();
 }
 
+/** Back to step i of the walk: the marker moves, no new step is recorded. */
+function trailJump(i) {
+  const s = trail.steps[i];
+  if (!s) return;
+  trail.at = i;
+  trail.jumping = true;
+  history.pushState(null, "", s.hash);
+  readHash(); syncControls();
+  draw({ push: false, fromGame: !!game });
+}
+
 function renderTrail() {
   const el = $("trail");
   if (trail.steps.length < 2) { el.hidden = true; return; }
@@ -1520,14 +1579,7 @@ function renderTrail() {
     a.textContent = s.q;
     a.title = s.view === "in" ? `what links to ${s.q}` : s.view === "out" ? `what ${s.q} links to` : `around ${s.q}`;
     if (i === trail.at) a.classList.add("here");
-    a.addEventListener("click", (e) => {
-      e.preventDefault();
-      trail.at = i;
-      trail.jumping = true;
-      history.pushState(null, "", s.hash);
-      readHash(); syncControls();
-      draw({ push: false, fromGame: !!game });
-    });
+    a.addEventListener("click", (e) => { e.preventDefault(); trailJump(i); });
     return a;
   });
   // Past eight, collapse the middle: the start and the last few are what you reach for.
@@ -1753,6 +1805,174 @@ if (!info.reader) {
 if (info.minLenDefault !== undefined && !location.hash.includes("minlen=")) {
   $("minlen").value = String(info.minLenDefault);
 }
+
+/**
+ * Keys. None of them while typing in a box; Esc closes things in the order they
+ * stack, nearest first. The palette is one box for everything: an article name draws
+ * around it, a view word in front chooses the view -- "path cheese black hole" is
+ * resolved by trying each split of the words until both halves are articles.
+ */
+const VIEW_WORDS = [
+  [/^(around|near|neighbou?rhood|nbhd)\s+(.+)$/i, "neighborhood"],
+  [/^(in|links to|linking to|what links to)\s+(.+)$/i, "in"],
+  [/^(out|links from|what .+ links to)\s+(.+)$/i, "out"],
+  [/^(path|route|from)\s+(.+)$/i, "path"],
+  [/^(common|both|between)\s+(.+)$/i, "common"],
+  [/^(similar|like|related)\s+(.+)$/i, "similar"],
+  [/^(category|cat|under)\s+(.+)$/i, "category"],
+  [/^(mentions?|text|fulltext)\s+(.+)$/i, "text"],
+  [/^(order|prereqs?|learn|reading order( for)?)\s+(.+)$/i, "order"],
+  [/^(top|most linked|hubs)$/i, "top"],
+];
+const VIEW_NAMES = Object.fromEntries([...$("view").options].map((o) => [o.value, o.text]));
+const palette = {
+  open: false, at: 0, items: [], seq: 0,
+  show() {
+    this.open = true;
+    $("palette").hidden = false;
+    $("paletteInput").value = "";
+    $("paletteInput").focus();
+    this.render([{ kind: "hint", title: "Type an article, or a view in words", none: true }]);
+  },
+  hide() { this.open = false; $("palette").hidden = true; },
+  render(items) {
+    this.items = items; this.at = 0;
+    $("paletteList").replaceChildren(...items.map((it, i) => {
+      const li = document.createElement("li");
+      if (it.none) { li.className = "none"; li.textContent = it.title; return li; }
+      if (i === 0) li.className = "on";
+      const k = document.createElement("span"); k.className = "k"; k.textContent = it.kind;
+      const t = document.createElement("span"); t.className = "t"; t.textContent = it.title;
+      const m = document.createElement("span"); m.className = "m"; m.textContent = it.meta ?? "";
+      li.append(k, t, m);
+      li.addEventListener("click", () => this.go(it));
+      li.addEventListener("mousemove", () => this.mark(i));
+      return li;
+    }));
+  },
+  mark(i) {
+    this.at = i;
+    [...$("paletteList").children].forEach((li, j) => li.classList.toggle("on", j === i));
+  },
+  // The two-article views without a separator: "path cheese black hole". Each split
+  // of the words is tried; the first where both halves are articles wins.
+  async twoArticles(rest) {
+    const sep = rest.split(/\s*(?:>|→|->|\||\s+to\s+|\s+and\s+|,)\s*/);
+    if (sep.length === 2 && sep[0] && sep[1]) return sep;
+    const words = rest.split(/\s+/);
+    const exact = async (t) => {
+      const hits = await (await fetch(`api/search?q=${encodeURIComponent(t)}&limit=3&hide=&minlen=0`)).json();
+      return hits.find((h) => h.title.replace(/_/g, " ").toLowerCase() === t.toLowerCase())?.title.replace(/_/g, " ");
+    };
+    for (let i = 1; i < words.length; i++) {
+      const a = words.slice(0, i).join(" "), b = words.slice(i).join(" ");
+      const [ra, rb] = await Promise.all([exact(a), exact(b)]);
+      if (ra && rb) return [ra, rb];
+    }
+    return null;
+  },
+  async update() {
+    const text = $("paletteInput").value.trim();
+    const seq = ++this.seq;
+    if (!text) { this.render([{ kind: "hint", title: "Type an article, or a view in words", none: true }]); return; }
+    const items = [];
+    // A view in words.
+    for (const [re, view] of VIEW_WORDS) {
+      const m = text.match(re);
+      if (!m) continue;
+      const rest = (m[2] ?? "").trim();
+      if (["path", "common"].includes(view)) {
+        const two = await this.twoArticles(rest);
+        if (seq !== this.seq) return;
+        if (two) items.push({ kind: "view", title: `${VIEW_NAMES[view]}: ${two[0]} → ${two[1]}`, view, q: two[0], q2: two[1] });
+        else items.push({ kind: "view", title: `${VIEW_NAMES[view]}: name two articles`, none: true });
+      } else if (view === "top") {
+        items.push({ kind: "view", title: VIEW_NAMES.top, view });
+      } else if (rest) {
+        items.push({ kind: "view", title: `${VIEW_NAMES[view]} ${rest}`, view, q: rest });
+      }
+      break;
+    }
+    // Saved views and the reading list, by title.
+    const lc = text.toLowerCase();
+    for (const s of saved.list()) if (s.title.toLowerCase().includes(lc)) items.push({ kind: "saved", title: s.title, hash: s.hash });
+    for (const r of reading.list()) if (r.title.toLowerCase().includes(lc)) items.push({ kind: r.state === "read" ? "read" : "to read", title: r.title, view: "neighborhood", q: r.title });
+    // Articles, with a disambiguation page's options in front of the page itself.
+    if (text.length >= 2) {
+      const hits = await (await fetch(`api/search?q=${encodeURIComponent(text)}&limit=8&hide=${hideValue()}&minlen=${$("minlen").value}`)).json();
+      if (seq !== this.seq) return;
+      const dab = hits.find((h) => h.dab);
+      for (const o of dab?.options ?? []) items.push({ kind: "one of " + dab.title.replace(/_/g, " "), title: o.title.replace(/_/g, " "), meta: o.topic ?? "", view: "neighborhood", q: o.title.replace(/_/g, " ") });
+      for (const h of hits) {
+        if (h.dab || dab?.options.some((o) => o.idx === h.idx)) continue;
+        items.push({ kind: "article", title: h.title.replace(/_/g, " "), meta: (h.via ? `via ${h.via} · ` : "") + `${h.deg.toLocaleString()} in`, view: "neighborhood", q: h.title.replace(/_/g, " ") });
+      }
+    }
+    if (!items.length) items.push({ kind: "none", title: "nothing matches", none: true });
+    this.render(items.slice(0, 14));
+  },
+  go(it) {
+    if (!it || it.none) return;
+    this.hide();
+    if (it.hash) { saved.open(it.hash); return; }
+    $("view").value = it.view;
+    if (it.q !== undefined) $("q").value = it.q;
+    if (it.q2 !== undefined) $("q2").value = it.q2;
+    syncControls();
+    draw();
+  },
+};
+let paletteTimer;
+$("paletteInput").addEventListener("input", () => { clearTimeout(paletteTimer); paletteTimer = setTimeout(() => palette.update(), 120); });
+$("paletteInput").addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown") { e.preventDefault(); palette.mark(Math.min(palette.items.length - 1, palette.at + 1)); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); palette.mark(Math.max(0, palette.at - 1)); }
+  else if (e.key === "Enter") {
+    e.preventDefault();
+    // Enter before the lookup landed: wait for it, then take the first choice.
+    clearTimeout(paletteTimer);
+    palette.update().then(() => palette.go(palette.items[palette.at]));
+  }
+});
+$("palette").addEventListener("click", (e) => { if (e.target === $("palette")) palette.hide(); });
+$("keys").addEventListener("click", (e) => { if (e.target === $("keys")) $("keys").hidden = true; });
+
+/** Close the nearest open thing; true if something was closed. */
+function closeOne() {
+  if (palette.open) { palette.hide(); return true; }
+  if (!$("keys").hidden) { $("keys").hidden = true; return true; }
+  if (!$("savedPanel").hidden) { saved.hide(); return true; }
+  if (!$("readingPanel").hidden) { reading.hide(); return true; }
+  if (table.open) { table.hide(); return true; }
+  if (reader.open) { reader.close(); return true; }
+  for (const id of ["order", "dab", "pathWhy", "game"]) if (!$(id).hidden) { $(id).hidden = true; return true; }
+  return false;
+}
+const typing = (e) => {
+  const el = e.target;
+  return el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+};
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); palette.open ? palette.hide() : palette.show(); return; }
+  if (e.key === "Escape") { if (closeOne()) e.preventDefault(); return; }
+  if (typing(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+  switch (e.key) {
+    case "/": e.preventDefault(); ($("q").hidden ? $("list") : $("q")).focus(); ($("q").hidden ? $("list") : $("q")).select?.(); break;
+    case "?": e.preventDefault(); $("keys").hidden = !$("keys").hidden; break;
+    case "[": if (trail.at > 0) trailJump(trail.at - 1); break;
+    case "]": if (trail.at < trail.steps.length - 1) trailJump(trail.at + 1); break;
+    case "t": table.open ? table.hide() : table.show(); break;
+    case "f": $("mount").querySelector("#vg-follow")?.click(); break;
+    case "r": {
+      if (reader.open) { reader.close(); break; }
+      const sel = disc.api()?.state?.selected;
+      const label = sel != null ? disc.api().graph.getNodeAttribute(sel, "label") : null;
+      if (label && info.reader) reader.show(`${info.reader}/${encodeURIComponent(label.replace(/ /g, "_"))}`, label);
+      else status(label ? "no reader configured" : "select an article first", true);
+      break;
+    }
+  }
+});
 
 /**
  * The disc as a table. Same articles, same visibility -- the legend's hidden wedges
