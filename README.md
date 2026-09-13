@@ -31,6 +31,7 @@ thousand articles chosen for a reason:
 | **Category tree** | everything under a category, N levels deep | direct subcategories |
 | **Most linked-to** | the top articles by in-degree | subject area |
 | **Reading order for** | *experimental* — what an article assumes, from lead paragraphs: its own lead links, and what two or more of those articles' leads share; drawn as a disc with the article pinned, listed as an order under the bar | subject area |
+| **These articles** | a pasted list — one title per line, or the Markdown this page's *Copy as Markdown* wrote — drawn as a set; titles that are not articles are named in the status line | subject area |
 | **Articles that mention** | every article whose *text* contains the words, from the ZIM's own full-text index, in Kiwix's ranking; the first hit is the largest dot | subject area |
 
 **Read the article beside the disc.** The card's *Read the article* opens a panel on the
@@ -96,6 +97,15 @@ section. On simplewiki: *Mass ×5, Particle ×4, Energy ×4, Speed of light, Sci
 *Mathematics, Physics, Chemistry, Atom, Electron …* then the article. Some forty fetches,
 cached; the set is drawn through `/api/view/set` with the article pinned. Whether the
 order convinces is a judgement made on screen, which is why it is marked experimental.
+
+**A pasted list is a view.** *These articles* takes a textarea: one title per line, or
+Markdown — list markers and checkboxes stripped, a link's text taken over its URL, a
+trailing "— first sentence" cut — which is exactly what *Copy as Markdown* writes, so the
+export reads back in. Drawn through `/api/view/set`; whatever did not resolve is named in
+the status line ("not found: Nope Nope Nope"), never dropped in silence. Short lists ride
+in the hash and are shareable; past 4,000 characters the hash says `list=@session` and the
+list lives in the tab's sessionStorage. *Draw the list* in the Reading panel sends the
+reading list through the same door.
 
 **Links have a direction, and now show it.** Every edge carries `d`: 1 for s→t, 2 for
 t→s, 3 for both. On the card each neighbour wears an arrow — *→ Belgium links to it*, *← it

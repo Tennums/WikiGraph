@@ -381,6 +381,7 @@ test("view: set (POST)", async () => {
   checkView(r.body);
   assert.equal(r.body.set.given, titles.length);
   assert.equal(r.body.set.unresolved, 1);
+  assert.deepEqual(r.body.set.unknown, ["Nope Nope Nope"], "the unknown title is named");
   assert.equal(r.body.nodes.length, 3, "deduplicated and resolved");
   assert.equal(r.body.nodes[0].type, "step #1");
   assert.equal(r.body.nodes[0].size, 1, "first is the largest");

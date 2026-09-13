@@ -258,10 +258,11 @@ const server = createServer(async (req, res) => {
         const limit = budget(q.get("limit"), 2000);
         const ids = [], rank = new Map();
         let unresolved = 0, filtered = 0;
+        const unknown = [];   // the first few unresolved titles, by name: a typo wants naming
         for (const t of body.titles.slice(0, 20000)) {
           if (ids.length >= limit) break;
           const i = graph.lookup(String(t));
-          if (i < 0) { unresolved++; continue; }
+          if (i < 0) { unresolved++; if (unknown.length < 20) unknown.push(String(t)); continue; }
           if (rank.has(i)) continue;
           if (!ok(i)) { filtered++; continue; }
           rank.set(i, ids.length); ids.push(i);
@@ -277,7 +278,7 @@ const server = createServer(async (req, res) => {
           const n = ids.length;
           data.nodes.forEach((node, i) => { node.size = Number((1 - Math.log1p(i) / Math.log1p(n)).toFixed(3)); });
         }
-        data.set = { given: body.titles.length, drawn: ids.length, unresolved, filtered };
+        data.set = { given: body.titles.length, drawn: ids.length, unresolved, filtered, unknown };
         // A caller may name the article the set is about; it goes to the hub.
         if (typeof body.pin === "string") {
           const pinIdx = graph.lookup(body.pin);
