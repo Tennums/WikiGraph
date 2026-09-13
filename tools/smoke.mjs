@@ -426,6 +426,8 @@ test("view: the new-links lens", { skip: !info.previous }, async () => {
   assert.ok(r.body.since && r.body.since.build === info.previous);
   const fresh = r.body.edges.filter((e) => e.w === 2).length;
   assert.equal(fresh, r.body.since.newEdges, "count matches the marked edges");
+  assert.ok(Array.isArray(r.body.since.newArticles) && Number.isInteger(r.body.since.newArticleCount), "new articles listed");
+  assert.ok(r.body.since.newArticles.every((t) => r.body.nodes.some((n) => n.label === t)), "new articles are on the disc");
   if (FACTS) assert.ok(fresh > 0, "the new season shows");
 });
 

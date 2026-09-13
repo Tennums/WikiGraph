@@ -133,6 +133,24 @@
   #trailClear { padding: 0 6px; font: inherit; color: #8b93a1; background: transparent;
                 border: 1px solid transparent; }
   #trailClear:hover { border-color: #333944; color: #e8e8ea; }
+  /* The month's digest: a note under the bar, and a sheet. */
+  #digestNote { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 12px;
+                background: #1c2430; border-bottom: 1px solid #2c3f57; font-size: 12px; color: #e8e8ea; }
+  #digestNote[hidden] { display: none; }
+  #digestNote b { color: #9fd0ff; }
+  #digestNote button { padding: 2px 8px; }
+  #digest .sheet { max-height: 80vh; display: flex; flex-direction: column; }
+  #digest h3 { margin: 0 0 8px; font-size: 14px; }
+  #digestBody { overflow-y: auto; font-size: 13px; }
+  #digestBody h4 { margin: 10px 0 4px; font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: #8b93a1; }
+  #digestBody ul { margin: 0; padding-left: 18px; }
+  #digestBody li { margin: 2px 0; }
+  #digestBody li a { color: #e8e8ea; text-decoration: none; }
+  #digestBody li a:hover { color: #9fd0ff; }
+  #digestBody .up { color: #b6f09c; } #digestBody .down { color: #ff8b8b; } #digestBody .dim { color: #8b93a1; }
+  #digestBody .names { color: #c4c9d2; font-size: 12px; }
+  #digestBody .none { color: #8b93a1; font-style: italic; }
+  #digestFoot { display: flex; gap: 6px; margin-top: 10px; }
   /* A category's parents: the way up, above the disc. */
   #catParents { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 4px 12px;
                 background: #181b20; border-bottom: 1px solid #2c313a; font-size: 12px; color: #8b93a1; }
@@ -415,12 +433,30 @@
     <button id="readingCopy" title="The reading list as Markdown, on the clipboard">Copy list as Markdown</button>
     <button id="viewCopy" title="The articles on the disc as a Markdown list, on the clipboard">Copy view as Markdown</button>
     <button id="readingDraw" title="The reading list as a disc: how what you read hangs together">Draw the list</button>
+    <button id="readingDigest" title="What changed around your reading list and saved views since the previous build">This month's changes</button>
   </div>
 </div>
 
 <div id="trail" hidden>
   <span id="trailItems"></span>
   <button id="trailClear" title="Forget this walk">&times;</button>
+</div>
+
+<div id="digestNote" hidden>
+  <span id="digestNoteText"></span>
+  <button id="digestShow">Show</button>
+  <button id="digestLater" title="Not now; asked again next time">Later</button>
+</div>
+
+<div id="digest" class="overlay" hidden>
+  <div class="sheet">
+    <h3 id="digestTitle">This month, for your subjects</h3>
+    <div id="digestBody"></div>
+    <div id="digestFoot">
+      <button id="digestCopy">Copy as Markdown</button>
+      <button id="digestClose">Close</button>
+    </div>
+  </div>
 </div>
 
 <div id="catParents" hidden>
@@ -583,6 +619,45 @@ function writeHash(push) {
 // title once the scene is built) and the titles it holds, for the reader to mark.
 const disc = { mounted: null, labels: new Set(), api() { return this.mounted?.api ?? null; } };
 
+/**
+ * A view as a plain object -- what the controls hold, or what a saved hash says --
+ * and the API URL for it. Kept apart from the DOM so a saved view can be re-run
+ * without touching the controls (the monthly digest does), and drawn from the same
+ * function so the two can never disagree.
+ */
+const P_FIELDS = ["view", "q", "q2", "limit", "hops", "minlen", "within", "and", "not", "depth", "group", "rank", "size"];
+function paramsFromControls() {
+  const p = Object.fromEntries(P_FIELDS.map((f) => [f, $(f).value.trim()]));
+  p.hide = hideValue(); p.mutual = $("mutual").checked; p.since = $("since").checked;
+  return p;
+}
+function paramsFromHash(hash) {
+  const h = new URLSearchParams(String(hash).replace(/^#/, ""));
+  const d = { view: "neighborhood", q: "", q2: "", limit: "2500", hops: "2", minlen: String(info.minLenDefault ?? 1000),
+              within: "", and: "", not: "", depth: "3", group: "topic", rank: "indegree", size: "degree" };
+  const p = Object.fromEntries(P_FIELDS.map((f) => [f, (h.get(f) ?? d[f]).trim()]));
+  p.hide = h.get("hide") ?? "list,date,dab,infra"; p.mutual = h.get("mutual") === "1"; p.since = h.get("since") === "1";
+  return p;
+}
+function filterQuery(p) {
+  const cat = (k) => (p.view !== "category" && p[k] ? `&${k}=${encodeURIComponent(p[k])}` : "");
+  return `&hide=${p.hide}&minlen=${p.minlen}&group=${p.group}&rank=${p.rank}&size=${p.size}` +
+         (p.mutual ? "&mutual=1" : "") + (p.since ? "&since=1" : "") + cat("within") + cat("and") + cat("not");
+}
+/** The GET URL for a view, or null for the views that go through a POST (text, order, list). */
+function apiUrl(p) {
+  const t = encodeURIComponent(p.q), t2 = encodeURIComponent(p.q2);
+  const base = p.view === "top" ? `api/view/top?limit=${p.limit}`
+    : p.view === "category" ? `api/view/category?title=${t}&limit=${p.limit}&depth=${p.depth}`
+    : p.view === "path" ? `api/view/path?from=${t}&to=${t2}&limit=${p.limit}`
+    : p.view === "common" ? `api/view/common?from=${t}&to=${t2}&limit=${p.limit}`
+    : p.view === "similar" ? `api/view/similar?title=${t}&limit=${p.limit}`
+    : ["neighborhood", "in", "out"].includes(p.view)
+      ? `api/view/neighborhood?title=${t}&limit=${p.limit}&hops=${p.hops}&direction=${p.view === "neighborhood" ? "both" : p.view}`
+      : null;
+  return base && base + filterQuery(p);
+}
+
 async function draw({ push = true, fromGame = false } = {}) {
   // The game bar belongs to a game in progress. A draw the game did not ask for --
   // the Draw button, a changed view or filter, Surprise me, the back button -- means
@@ -594,21 +669,9 @@ async function draw({ push = true, fromGame = false } = {}) {
   const limit = $("limit").value;
   writeHash(push);
 
-  const t = encodeURIComponent(q);
-  const w = $("within").value.trim();
-  const hide = `&hide=${hideValue()}&minlen=${$("minlen").value}&group=${$("group").value}&rank=${$("rank").value}&size=${$("size").value}` +
-               ($("mutual").checked ? "&mutual=1" : "") + ($("since").checked ? "&since=1" : "") +
-               (w && view !== "category" ? `&within=${encodeURIComponent(w)}` : "") +
-               (view !== "category" && $("and").value.trim() ? `&and=${encodeURIComponent($("and").value.trim())}` : "") +
-               (view !== "category" && $("not").value.trim() ? `&not=${encodeURIComponent($("not").value.trim())}` : "");
-  const url = (
-    view === "top" ? `api/view/top?limit=${limit}`
-    : view === "category" ? `api/view/category?title=${t}&limit=${limit}&depth=${$("depth").value}`
-    : view === "path" ? `api/view/path?from=${t}&to=${encodeURIComponent($("q2").value.trim())}&limit=${limit}`
-    : view === "common" ? `api/view/common?from=${t}&to=${encodeURIComponent($("q2").value.trim())}&limit=${limit}`
-    : view === "similar" ? `api/view/similar?title=${t}&limit=${limit}`
-    : `api/view/neighborhood?title=${t}&limit=${limit}&hops=${$("hops").value}` +
-      `&direction=${view === "neighborhood" ? "both" : view}`) + hide;
+  const p = paramsFromControls();
+  const hide = filterQuery(p);
+  const url = apiUrl(p);
 
   status("querying…");
   const t0 = performance.now();
@@ -1854,6 +1917,125 @@ if (info.minLenDefault !== undefined && !location.hash.includes("minlen=")) {
 }
 
 /**
+ * The month's digest: what changed around what you follow, since the previous
+ * build. Reading-list articles get their `since` from /api/article (in-links arrived
+ * and left); saved views are re-run with the new-links lens and report the articles
+ * that were not in the previous build and the links that are new. Computed here, in
+ * the page, from the two builds the server holds: a few dozen requests, the same
+ * answer all month, so it is kept for the session. The note under the bar appears
+ * once per build per browser, when there is something to say.
+ */
+const digest = {
+  result: null, forBuild: null,
+  eligible() { return !!(info.previous && info.build && (reading.list().length || saved.list().length)); },
+  async compute() {
+    if (this.result && this.forBuild === info.build) return this.result;
+    const articles = [];
+    for (const r of reading.list().slice(0, 80)) {
+      try {
+        const a = await (await fetch(`api/article?title=${encodeURIComponent(r.title.replace(/ /g, "_"))}`)).json();
+        if (a?.since) articles.push({ title: r.title, state: r.state, ...a.since });
+      } catch {}
+    }
+    articles.sort((a, b) => (b.gainedCount + b.lostCount) - (a.gainedCount + a.lostCount));
+    const views = [];
+    for (const v of saved.list().slice(0, 40)) {
+      const p = paramsFromHash(v.hash); p.since = true;
+      const url = apiUrl(p);
+      if (!url) { views.push({ title: v.title, hash: v.hash, skipped: true }); continue; }
+      try {
+        const d = await (await fetch(url)).json();
+        if (d.error) { views.push({ title: v.title, hash: v.hash, error: d.error }); continue; }
+        views.push({ title: v.title, hash: v.hash, nodes: d.nodes.length, newEdges: d.since?.newEdges ?? 0,
+                     newArticles: d.since?.newArticles ?? [], newArticleCount: d.since?.newArticleCount ?? 0 });
+      } catch (e) { views.push({ title: v.title, hash: v.hash, error: e.message }); }
+    }
+    views.sort((a, b) => ((b.newArticleCount ?? 0) + (b.newEdges ?? 0)) - ((a.newArticleCount ?? 0) + (a.newEdges ?? 0)));
+    this.result = { build: info.build, previous: info.previous, articles, views };
+    this.forBuild = info.build;
+    return this.result;
+  },
+  async show() {
+    $("digest").hidden = false;
+    $("digestBody").innerHTML = '<div class="none">looking at both builds…</div>';
+    const r = await this.compute();
+    this.render(r);
+    try { localStorage.setItem("wikigraph.seenBuild", info.build); } catch {}
+    $("digestNote").hidden = true;
+  },
+  hide() { $("digest").hidden = true; },
+  render(r) {
+    $("digestTitle").textContent = `Since ${r.previous}, for your subjects (build ${r.build})`;
+    const body = $("digestBody"); body.replaceChildren();
+    const h = (text) => { const e = document.createElement("h4"); e.textContent = text; body.append(e); };
+    const link = (title, onclick) => { const a = document.createElement("a"); a.href = "#"; a.textContent = title; a.addEventListener("click", (e) => { e.preventDefault(); this.hide(); onclick(); }); return a; };
+    const num = (n, cls) => { const s = document.createElement("span"); s.className = cls; s.textContent = n; return s; };
+    h(`Reading list (${r.articles.length})`);
+    if (!r.articles.length) body.append(Object.assign(document.createElement("div"), { className: "none", textContent: "nothing on the reading list" }));
+    else {
+      const ul = document.createElement("ul");
+      for (const a of r.articles) {
+        const li = document.createElement("li");
+        li.append(link(a.title, () => { $("view").value = "neighborhood"; $("q").value = a.title; syncControls(); draw(); }), " ");
+        if (!a.old) li.append(num("new this build", "up"));
+        else if (!a.gainedCount && !a.lostCount) li.append(num("unchanged", "dim"));
+        else {
+          if (a.gainedCount) li.append(num(`+${a.gainedCount.toLocaleString()} in-links`, "up"));
+          if (a.gainedCount && a.lostCount) li.append(" ");
+          if (a.lostCount) li.append(num(`−${a.lostCount.toLocaleString()}`, "down"));
+          if (a.gained.length) { const n = document.createElement("div"); n.className = "names"; n.textContent = "from " + a.gained.slice(0, 6).join(", ") + (a.gainedCount > 6 ? ", …" : ""); li.append(n); }
+        }
+        ul.append(li);
+      }
+      body.append(ul);
+    }
+    h(`Saved views (${r.views.length})`);
+    if (!r.views.length) body.append(Object.assign(document.createElement("div"), { className: "none", textContent: "no saved views" }));
+    else {
+      const ul = document.createElement("ul");
+      for (const v of r.views) {
+        const li = document.createElement("li");
+        li.append(link(v.title, () => saved.open(v.hash)), " ");
+        if (v.skipped) li.append(num("not re-run: a search or list view", "dim"));
+        else if (v.error) li.append(num(v.error, "down"));
+        else if (!v.newArticleCount && !v.newEdges) li.append(num(`unchanged · ${v.nodes} articles`, "dim"));
+        else {
+          if (v.newArticleCount) li.append(num(`${v.newArticleCount} new article${v.newArticleCount === 1 ? "" : "s"}`, "up"), " ");
+          if (v.newEdges) li.append(num(`${v.newEdges.toLocaleString()} new links`, "up"));
+          if (v.newArticles.length) { const n = document.createElement("div"); n.className = "names"; n.textContent = v.newArticles.slice(0, 8).join(", ") + (v.newArticleCount > 8 ? ", …" : ""); li.append(n); }
+        }
+        ul.append(li);
+      }
+      body.append(ul);
+    }
+  },
+  markdown(r) {
+    const L = [`# Since ${r.previous}, for your subjects (build ${r.build})`, "", "## Reading list", ""];
+    for (const a of r.articles) L.push(`- ${reading.link(a.title)} — ${!a.old ? "new this build" : !a.gainedCount && !a.lostCount ? "unchanged" : `${a.gainedCount ? `+${a.gainedCount} in-links` : ""}${a.gainedCount && a.lostCount ? ", " : ""}${a.lostCount ? `−${a.lostCount}` : ""}${a.gained.length ? ` (from ${a.gained.slice(0, 6).join(", ")})` : ""}`}`);
+    L.push("", "## Saved views", "");
+    for (const v of r.views) L.push(`- ${v.title} — ${v.skipped ? "not re-run" : v.error ? v.error : !v.newArticleCount && !v.newEdges ? "unchanged" : `${v.newArticleCount} new articles, ${v.newEdges} new links${v.newArticles.length ? ` (${v.newArticles.slice(0, 8).join(", ")})` : ""}`}`);
+    return L.join("\n") + "\n";
+  },
+  note() {
+    let seen = null;
+    try { seen = localStorage.getItem("wikigraph.seenBuild"); } catch {}
+    if (!this.eligible() || seen === info.build) { $("digestNote").hidden = true; return; }
+    $("digestNoteText").innerHTML = `New build <b>${info.build}</b>. What changed around your reading list and saved views since <b>${info.previous}</b>?`;
+    $("digestNote").hidden = false;
+  },
+};
+$("digestShow").addEventListener("click", () => digest.show());
+$("digestLater").addEventListener("click", () => { $("digestNote").hidden = true; });
+$("digestClose").addEventListener("click", () => digest.hide());
+$("digest").addEventListener("click", (e) => { if (e.target === $("digest")) digest.hide(); });
+$("digestCopy").addEventListener("click", async () => { const r = await digest.compute(); await reading.clip(digest.markdown(r), "the digest"); });
+$("readingDigest").addEventListener("click", () => {
+  reading.hide();
+  if (!info.previous) { status("no previous build to compare with", true); return; }
+  digest.show();
+});
+
+/**
  * Keys. None of them while typing in a box; Esc closes things in the order they
  * stack, nearest first. The palette is one box for everything: an article name draws
  * around it, a view word in front chooses the view -- "path cheese black hole" is
@@ -1987,6 +2169,7 @@ $("keys").addEventListener("click", (e) => { if (e.target === $("keys")) $("keys
 /** Close the nearest open thing; true if something was closed. */
 function closeOne() {
   if (palette.open) { palette.hide(); return true; }
+  if (!$("digest").hidden) { digest.hide(); return true; }
   if (!$("keys").hidden) { $("keys").hidden = true; return true; }
   if (!$("savedPanel").hidden) { saved.hide(); return true; }
   if (!$("readingPanel").hidden) { reading.hide(); return true; }
@@ -2516,6 +2699,7 @@ saved.render();
 // what is saved. Served from the cache when the server has no state store.
 await Promise.all([store.pull("reading"), store.pull("saved")]);
 reading.render(); saved.render();
+digest.note();
 
 readHash();
 syncControls();

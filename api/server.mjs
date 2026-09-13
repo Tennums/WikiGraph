@@ -208,9 +208,12 @@ const sizeBy = (q) => {
 const wantSince = (q) => ["1", "true", "yes"].includes(q.get("since") ?? "");
 const withSince = (q, data) => {
   if (!wantSince(q) || !graph.previous) return data;
-  const fresh = graph.newEdges(data.nodes.map((n) => n.label), data.edges);
+  const labels = data.nodes.map((n) => n.label);
+  const fresh = graph.newEdges(labels, data.edges);
   for (const k of fresh) data.edges[k].w = 2;
-  data.since = { build: graph.previous.name, newEdges: fresh.size };
+  // And the articles that were not there at all: the ones the month brought.
+  const newArticles = labels.filter((l) => graph.previous.idxOf(l.replace(/ /g, "_")) < 0);
+  data.since = { build: graph.previous.name, newEdges: fresh.size, newArticles: newArticles.slice(0, 200), newArticleCount: newArticles.length };
   return data;
 };
 

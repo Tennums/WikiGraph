@@ -206,6 +206,16 @@ hockey* lights up with the new season's players — and the status line counts t
 renamed article is all departures under the old title and all arrivals under the new,
 which is what happened to the links. Without a second build the checkbox is not offered.
 
+**The month, for your subjects.** On the first load after a new build (once per build
+per browser) a note under the bar asks whether to show what changed around your reading
+list and saved views since the previous build; *This month's changes* in the Reading panel
+asks any time. Reading-list articles report their in-links arrived and left, from
+`/api/article`'s `since`, the biggest movers first; saved views are re-run with the
+new-links lens and report the articles that were not in the previous build and the links
+that are new (views that go through a search or a pasted list are not re-run and say so).
+Computed in the page from the two builds the server holds — a few dozen requests — and
+kept for the session; *Copy as Markdown* for notes.
+
 **The disc as a table.** *Table* in the bar lays the same articles over the disc as
 sortable rows — title, in-links over the wiki, links on the disc, words, wedge, hop or role,
 kind, reading state, last edited — with a text filter and *Copy as Markdown* (a Markdown
