@@ -88,10 +88,16 @@ function checkView(data, { minNodes = 1 } = {}) {
   assert.ok(Array.isArray(data.edges), "edges array");
   assert.equal(typeof data.vault, "string");
   const n = data.nodes.length;
+  const pairs = new Set();
   for (const e of data.edges) {
     assert.ok(Number.isInteger(e.s) && e.s >= 0 && e.s < n, `edge s in range: ${e.s}`);
     assert.ok(Number.isInteger(e.t) && e.t >= 0 && e.t < n, `edge t in range: ${e.t}`);
     assert.ok(e.s !== e.t, "no self loops");
+    assert.ok(e.s < e.t, "pairs ordered");
+    assert.ok([1, 2, 3].includes(e.d), `direction on every edge: ${e.d}`);
+    const k = e.s * n + e.t;
+    assert.ok(!pairs.has(k), "each pair once");
+    pairs.add(k);
   }
   for (const p of data.pinned ?? []) {
     assert.ok(/^\d+$/.test(p) && Number(p) < n, `pinned is a position: ${p}`);
@@ -237,6 +243,11 @@ test("view: neighborhood, all directions, hops, filters, within", async () => {
   const mutual = await get(`/api/view/neighborhood?title=Belgium&hops=1&mutual=1&limit=1000&${HIDE}`);
   checkView(mutual.body);
   assert.ok(mutual.body.nodes.length <= one.body.nodes.length, "mutual is a subset");
+  assert.ok(mutual.body.edges.every((e) => e.d === 3), "mutual edges are both ways");
+  // Both one-way orientations must survive: a link from a later position to an
+  // earlier one was once dropped, and a neighbourhood has plenty of each.
+  const ds = new Set(one.body.edges.map((e) => e.d));
+  assert.ok(ds.has(1) && ds.has(2) && ds.has(3), `all three directions present: ${[...ds]}`);
 
   // filters reduce, and unfiltered includes lists
   const loose = await get("/api/view/neighborhood?title=Belgium&hops=1&limit=1000&hide=&minlen=0");

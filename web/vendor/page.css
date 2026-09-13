@@ -596,6 +596,13 @@
   .vault-graph #vg-detail .preview.pending { color: var(--text-3); font-style: italic; }
   /* wikigraph: the host's buttons in the actions row, styled as the others. */
   .vault-graph #vg-detail .host-actions { display: contents; }
+  /* wikigraph: the link's direction before a neighbour, and the sort toggle. */
+  .vault-graph #vg-detail li .dir { display: inline-block; width: 14px; color: var(--text-3); font-size: 11px; }
+  .vault-graph #vg-detail .nb .nbsort {
+    float: right; font: inherit; font-size: 10px; text-transform: none; letter-spacing: 0; font-weight: 400;
+    color: var(--text-3); background: none; border: 0; cursor: pointer; padding: 0 2px;
+  }
+  .vault-graph #vg-detail .nb .nbsort:hover { color: var(--text); }
   /* wikigraph: "why?" beside a neighbour, and the sentence it opens. */
   .vault-graph #vg-detail ul li { display: flex; flex-wrap: wrap; align-items: baseline; }
   .vault-graph #vg-detail ul li > button:first-child { flex: 1; min-width: 0; }

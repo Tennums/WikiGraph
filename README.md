@@ -97,6 +97,17 @@ section. On simplewiki: *Mass ×5, Particle ×4, Energy ×4, Speed of light, Sci
 cached; the set is drawn through `/api/view/set` with the article pinned. Whether the
 order convinces is a judgement made on screen, which is why it is marked experimental.
 
+**Links have a direction, and now show it.** Every edge carries `d`: 1 for s→t, 2 for
+t→s, 3 for both. On the card each neighbour wears an arrow — *→ Belgium links to it*, *← it
+links to Belgium*, *↔ mutual* — and the header toggles the list between *by links* and *by
+direction* (mutual, out, in). *Links: by direction* in the bar is a lens on the disc:
+mutual links white, and once an article is hovered or selected its outgoing links blue and
+its incoming orange (gold from the new-links lens wins); no redraw, only the ink changes.
+Carrying the direction also fixed a bug older than any feature: the induced subgraph used
+to emit a pair only from the lower position's own out-links, which silently dropped every
+one-way link running from a later position to an earlier one — about half of them. Discs
+now show all their links; counts in the status line went up accordingly.
+
 **Similar, without a link between them.** *Similar to Belgium* puts the Netherlands,
 Denmark and Luxembourg first; *Similar to Albert Einstein* Penrose, Lorentz, Bohr and
 Heisenberg; *Similar to Quantum mechanics* its interpretations and the wave function.

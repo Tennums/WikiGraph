@@ -885,27 +885,30 @@ export class WikiGraph {
     // pass collects every directed link inside the selection; the second keeps a pair
     // when its reverse was also seen. Keyed on the selection positions, which are
     // small, rather than on node ids.
+    // Every directed link inside the selection is collected first, keyed on the
+    // unordered pair, as two bits: 1 when the lower position links to the higher, 2
+    // the other way. Then each pair becomes one edge with `d` = 1 (s->t), 2 (t->s) or
+    // 3 (both). (An earlier version emitted a pair only from the lower position's own
+    // out-links, which silently dropped every one-way link running the other way --
+    // about half of them.)
     const n = ids.length;
-    const edges = [];
-    const degOnDisc = new Int32Array(n);
-    const addEdge = (from, to) => { edges.push({ s: from, t: to, w: 1 }); degOnDisc[from]++; degOnDisc[to]++; };
-    const seen = mutual ? new Set() : null;
+    const bits = new Map();
     for (const id of ids) {
       const from = pos.get(id);
       for (const v of this.neighbours(id)) {
         const to = pos.get(v);
         if (to === undefined || to === from) continue;
-        if (mutual) { seen.add(from * n + to); continue; }
-        if (to < from) continue; // undirected, once
-        addEdge(from, to);
+        const key = from < to ? from * n + to : to * n + from;
+        bits.set(key, (bits.get(key) ?? 0) | (from < to ? 1 : 2));
       }
     }
-    if (mutual) {
-      for (const key of seen) {
-        const from = Math.floor(key / n), to = key % n;
-        if (to < from || !seen.has(to * n + from)) continue;
-        addEdge(from, to);
-      }
+    const edges = [];
+    const degOnDisc = new Int32Array(n);
+    for (const [key, d] of bits) {
+      if (mutual && d !== 3) continue;
+      const s = Math.floor(key / n), t = key % n;
+      edges.push({ s, t, w: 1, d });
+      degOnDisc[s]++; degOnDisc[t]++;
     }
 
     // Clustering replaces the grouping with the link structure's own: communities

@@ -571,7 +571,7 @@ function mountVaultGraph(root, data, deps) {
   // github#43
   var EDGE_SIZE_MAX = EDGE_SIZE_LIT;
   /** @param {number} w @returns {EdgeAttrs} */
-  var edgeAttrsOf = function (w) { return { weight: w, size: EDGE_SIZE }; };
+  var edgeAttrsOf = function (w, from, d) { return { weight: w, size: EDGE_SIZE, from: from, dir: d || 0 }; };
   var EDGE_SHOWN = 0;
   var lazyEdges = false;
   (function () {
@@ -585,9 +585,12 @@ function mountVaultGraph(root, data, deps) {
       if (seen[k]) return;
       seen[k] = 1;
       EDGE_TOTAL++;
-      list.push({ a: a, b: b, w: e.w, k: k });
-      (adj[a] || (adj[a] = [])).push({ o: b, w: e.w });
-      if (b !== a) (adj[b] || (adj[b] = [])).push({ o: a, w: e.w });
+      // wikigraph: `d` is the link's direction, 1 = s->t, 2 = t->s, 3 = both; in each
+      // node's adjacency it is read from that node's side (1 = "I link to o").
+      var d = e.d === 1 || e.d === 2 || e.d === 3 ? e.d : 0;
+      list.push({ a: a, b: b, w: e.w, k: k, d: d });
+      (adj[a] || (adj[a] = [])).push({ o: b, w: e.w, d: d });
+      if (b !== a) (adj[b] || (adj[b] = [])).push({ o: a, w: e.w, d: d === 1 ? 2 : d === 2 ? 1 : d });
     });
     var share = EDGE_TOTAL <= EDGE_RAMP_START ? 1
       : EDGE_TOTAL >= EDGE_RAMP_END ? EDGE_FLOOR
@@ -599,7 +602,7 @@ function mountVaultGraph(root, data, deps) {
       list.length = EDGE_SHOWN;
     }
     list.forEach(function (e) {
-      if (!graph.hasEdge(e.a, e.b)) graph.addUndirectedEdge(e.a, e.b, edgeAttrsOf(e.w));
+      if (!graph.hasEdge(e.a, e.b)) graph.addUndirectedEdge(e.a, e.b, edgeAttrsOf(e.w, e.a, e.d));
     });
   })();
 
@@ -4135,7 +4138,7 @@ function mountVaultGraph(root, data, deps) {
     lazyAdded = [];
     if (want) (adj[want] || []).forEach(function (e) {
       if (!graph.hasEdge(want, e.o)) {
-        graph.addUndirectedEdge(want, e.o, edgeAttrsOf(e.w));
+        graph.addUndirectedEdge(want, e.o, edgeAttrsOf(e.w, want, e.d));
         lazyAdded.push([want, e.o]);
       }
     });
@@ -4366,6 +4369,9 @@ function mountVaultGraph(root, data, deps) {
   }
 
   var MARK_TOREAD = "#ffd166", MARK_READ = "#6f8f7a", EDGE_NEW = "#e0b84a";
+  var EDGE_OUT = "#5aa9ff", EDGE_IN = "#ff9f43", EDGE_MUTUAL = "#e8e8ea";
+  // wikigraph: which lens colours the edges -- "direction" or nothing; the host sets it.
+  var edgeLens = deps.edgeLens === "direction" ? "direction" : null;
   /** @param {string} id @param {NodeAttrs} a @returns {NodeDisplayData & { haloColor?: string }} */
   function nodeStyle(id, a) {
         var r = /** @type {NodeDisplayData & { haloColor?: string }} */ (Object.assign({}, a));
@@ -4825,13 +4831,26 @@ function mountVaultGraph(root, data, deps) {
         // colour under focus so the lens survives a hover.
         var isNew = (a.weight || 1) >= 2;
         if (isNew) { r.color = EDGE_NEW; r.size = (a.size || 1) * 1.8; r.zIndex = 1; }
+        // wikigraph: the direction lens. Mutual links white; a one-way link keeps the
+        // plain colour until an article is hovered or selected, and is then blue when
+        // that article links out along it, orange when it is linked from the other end.
+        // Gold (new since last month) wins over both.
+        if (edgeLens === "direction" && !isNew && a.dir) {
+          var focusNode = state.hovered || state.selected;
+          if (a.dir === 3) r.color = EDGE_MUTUAL;
+          else if (focusNode && (focusNode === x[0] || focusNode === x[1])) {
+            var outward = (a.dir === 1) === (a.from === focusNode);
+            r.color = outward ? EDGE_OUT : EDGE_IN;
+            r.size = (a.size || 1) * 1.4;
+          }
+        }
         var focus = focusSet();
         if (state.query) { r.color = THEME.dim; return capEdge(r, a); }
         if (focus) {
           // github#43
           var ht = hoverAmount(), base = a.size || 1;
           if (focus[x[0]] && focus[x[1]]) {
-            r.color = isNew ? EDGE_NEW : mixHex(THEME.edge, THEME.edgeHi, ht);
+            r.color = isNew ? EDGE_NEW : (edgeLens === "direction" && a.dir) ? r.color : mixHex(THEME.edge, THEME.edgeHi, ht);
             r.size = base + (EDGE_SIZE_LIT - base) * ht;
             r.zIndex = 2;
           } else {
@@ -4944,6 +4963,8 @@ function mountVaultGraph(root, data, deps) {
   /** @type {string[]} */
   var trail = [];
   var TRAIL_CAP = 30;
+  // wikigraph: the neighbour list's order, "links" (by degree) or "direction"
+  var nbSort = "links";
   var trailHop = false;
 
   /** @param {string} id */
@@ -5023,9 +5044,24 @@ function mountVaultGraph(root, data, deps) {
     if (!id) { d.hidden = true; renderer.refresh(); return; }
 
     var a = graph.getNodeAttributes(id);
+    // wikigraph: the direction of each link from this article's side, for the arrow
+    // before the neighbour and for the alternative sort (mutual, out, in).
+    var dirOf = dict();
+    (adj[id] || []).forEach(function (e) { dirOf[e.o] = e.d; });
+    var dirRank = { 3: 0, 1: 1, 2: 2, 0: 3 };
     var nb = neighboursOf(id).slice().sort(function (p, q) {
+      if (nbSort === "direction") {
+        var dp = dirRank[dirOf[p] || 0], dq = dirRank[dirOf[q] || 0];
+        if (dp !== dq) return dp - dq;
+      }
       return graph.getNodeAttribute(q, "deg") - graph.getNodeAttribute(p, "deg");
     });
+    var arrow = function (n) {
+      var d = dirOf[n] || 0;
+      return d === 3 ? '<span class="dir" title="Mutual: each links to the other">&#8596;</span>'
+           : d === 1 ? '<span class="dir" title="' + esc(a.label) + ' links to it">&#8594;</span>'
+           : d === 2 ? '<span class="dir" title="It links to ' + esc(a.label) + '">&#8592;</span>' : "";
+    };
     // Where "open" goes is the host's decision: the vault-graph plugin opened the note
     // in Obsidian, this page opens the article in Kiwix. `deps.articleHref(label)`
     // returns the URL, or nothing to drop the button entirely.
@@ -5074,9 +5110,11 @@ function mountVaultGraph(root, data, deps) {
     // it is handed an empty element under the row and fills it with the sentence.
     var canWhy = typeof deps.linkWhy === "function" && !a.ghost;
     if (nb.length) {
-      h += '<div class="nb">Linked articles (' + nb.length + ')</div><ul>' +
+      h += '<div class="nb">Linked articles (' + nb.length + ')' +
+           '<button type="button" class="nbsort" title="Sort by links, or by direction (mutual, out, in)">' +
+           (nbSort === "direction" ? "by direction" : "by links") + '</button></div><ul>' +
         nb.slice(0, 40).map(function (n) {
-          return '<li><button data-go="' + n + '">' +
+          return '<li><button data-go="' + n + '">' + arrow(n) +
                  esc(graph.getNodeAttribute(n, "label")) +
                  ' <span style="color:var(--text-3)">' + graph.getNodeAttribute(n, "deg") + '</span></button>' +
                  (canWhy ? '<button class="why" data-why="' + n + '" title="Why is this a link? The sentence that makes it">?</button>' +
@@ -5092,6 +5130,8 @@ function mountVaultGraph(root, data, deps) {
     d.setAttribute("role", "region");
     d.setAttribute("aria-label", a.label);
     d.querySelector(".x").onclick = function () { select(null); };
+    var ns = d.querySelector(".nbsort");
+    if (ns) ns.onclick = function () { nbSort = nbSort === "direction" ? "links" : "direction"; trailHop = true; select(id); };
     d.querySelector(".pin").onclick = function () { togglePin(id); select(id); };
     var rc = d.querySelector(".recenter");
     if (rc) rc.onclick = function () { deps.onRecenter(a.label); };
@@ -8350,6 +8390,10 @@ function mountVaultGraph(root, data, deps) {
                       if (id) goTo(id);
                     },
                     willShow: willShow,
+                    setEdgeLens: /** @param {string | null} v */ function (v) {
+                      edgeLens = v === "direction" ? "direction" : null;
+                      if (renderer) renderer.refresh();
+                    },
                     readTheme: readTheme, get renderer() { return renderer; },
                     placeLogo: placeLogo,
                     palette: paletteInfo,
