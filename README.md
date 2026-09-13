@@ -223,6 +223,17 @@ Markdown* puts `- [x] [Brussels](kiwix url) — first sentence` on the clipboard
 sentences fetched, a few dozen at most), *Copy view as Markdown* the disc's articles with
 topic and link count, headed by the view's URL — for notes.
 
+**The lists follow you.** With `STATE_DIR` set (the compose file mounts
+`DATA_DIR/state`), the reading list and the saved views live on the server as one small
+JSON file per key — `GET`/`PUT /api/state/<key>`, the only thing the API writes — so an
+article marked on the Mac is marked on the iPad. Each record carries a version; a `PUT`
+with a stale one is refused with the current record, and the page redoes its change on top
+of it, so two tabs or two devices cannot clobber each other unknowingly. localStorage stays
+the cache and the fallback: without a state store, or with the API unreachable, the page
+works from it and says so once. The first time a browser meets a server that has no record
+yet, what the browser has goes up. One user on a LAN — there is no login, and this is not
+the place to put one.
+
 **Saved views** are the same URLs, kept. ★ in the bar saves what is on screen under the
 disc's own heading (*Cheese → Black hole (3 hops)*), and turns off again on a view that is
 already saved; *Saved (n)* lists them, newest first, each a click back, × forgets one. In

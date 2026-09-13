@@ -20,6 +20,7 @@ import { createServer } from "node:net";
 import { existsSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -38,7 +39,8 @@ const port = await new Promise((ok) => {
   const s = createServer().listen(0, () => { const p = s.address().port; s.close(() => ok(p)); });
 });
 const server = spawn(process.execPath, [join(ROOT, "api/server.mjs")], {
-  env: { ...process.env, PORT: String(port), GRAPH_DIR, WIKI, WEB_DIR: join(ROOT, "web") },
+  env: { ...process.env, PORT: String(port), GRAPH_DIR, WIKI, WEB_DIR: join(ROOT, "web"),
+         STATE_DIR: process.env.STATE_DIR ?? join(tmpdir(), `wikigraph-smoke-state-${process.pid}`) },
   stdio: ["ignore", "pipe", "pipe"],
 });
 let serverLog = "";
@@ -125,6 +127,7 @@ test("info", async () => {
   assert.equal(typeof info.pagerank, "boolean");
   assert.ok(Number.isInteger(info.maxNodes) && info.maxNodes >= 1000);
   assert.ok("build" in info && "previous" in info && "reader" in info && "textSearch" in info);
+  assert.equal(typeof info.state, "boolean");
 });
 
 // ---- search --------------------------------------------------------------------------
@@ -431,6 +434,37 @@ test("view: a disambiguation seed offers choices", async () => {
   if (!FACTS) return;
   assert.equal(r.status, 200);
   assert.ok(r.body.dab && r.body.dab.options.length >= 3, "dab block");
+});
+
+// ---- state --------------------------------------------------------------------------
+test("state: get, put, version conflict, bad key", async () => {
+  const put = async (key, body) => {
+    const res = await fetch(`${base}/api/state/${key}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    return { status: res.status, body: await res.json() };
+  };
+  const key = `smoke-${process.pid % 1000}`;
+  if (!info.state) {
+    const off = await get(`/api/state/${key}`);
+    assert.equal(off.status, 404, "no STATE_DIR: 404");
+    return;
+  }
+  const empty = await get(`/api/state/${key}`);
+  assert.deepEqual(empty.body, { version: 0, data: null });
+  const w1 = await put(key, { version: 0, data: [{ title: "Brussels", state: "read" }] });
+  assert.equal(w1.status, 200); assert.equal(w1.body.version, 1);
+  const r1 = await get(`/api/state/${key}`);
+  assert.equal(r1.body.version, 1); assert.deepEqual(r1.body.data, [{ title: "Brussels", state: "read" }]);
+  const stale = await put(key, { version: 0, data: [] });
+  assert.equal(stale.status, 409, "stale version refused");
+  assert.equal(stale.body.version, 1, "the conflict carries the current record");
+  const w2 = await put(key, { version: 1, data: [] });
+  assert.equal(w2.status, 200); assert.equal(w2.body.version, 2);
+  const bad = await put("No Such/Key", { version: 0, data: [] });
+  assert.equal(bad.status, 400);
+  const shape = await put(key, { nope: 1 });
+  assert.equal(shape.status, 400);
+  const notAllowed = await fetch(`${base}/api/state/${key}`, { method: "DELETE" });
+  assert.equal(notAllowed.status, 405);
 });
 
 // ---- static --------------------------------------------------------------------------

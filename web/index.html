@@ -2141,6 +2141,74 @@ setInterval(() => {
 }, 800);
 
 /**
+ * Where the personal lists live. localStorage is always the cache and the fallback;
+ * with a STATE_DIR on the server (`info.state`), the server is the truth: read on load
+ * and replacing the cache, written through on every change with a version number, so
+ * two tabs or two devices cannot clobber each other without one of them noticing (the
+ * loser takes the server's record and redoes its change). The first time a browser
+ * meets a server that has no record yet, what the browser has goes up. Offline, the
+ * cache serves and the status line says so once.
+ */
+const store = {
+  version: {}, warned: false,
+  local(key) {
+    try { const v = JSON.parse(localStorage.getItem(`wikigraph.${key}`) ?? "[]"); return Array.isArray(v) ? v : []; }
+    catch { return []; }
+  },
+  setLocal(key, items) {
+    try { localStorage.setItem(`wikigraph.${key}`, JSON.stringify(items)); } catch (e) { status(`could not save: ${e.message}`, true); }
+  },
+  /** On load: take the server's record, or seed it with the browser's. Returns the items. */
+  async pull(key) {
+    if (!info.state) return this.local(key);
+    try {
+      const r = await fetch(`api/state/${key}`);
+      if (!r.ok) throw new Error(r.statusText);
+      const rec = await r.json();
+      this.version[key] = rec.version;
+      if (Array.isArray(rec.data)) { this.setLocal(key, rec.data); return rec.data; }
+      // No record yet: the browser's list becomes the first one.
+      const mine = this.local(key);
+      if (mine.length) await this.push(key, mine);
+      return mine;
+    } catch (e) {
+      this.offline(e);
+      return this.local(key);
+    }
+  },
+  /** Every change: the cache first, then the server; a version conflict is retried on the server's record. */
+  async push(key, items, merge) {
+    this.setLocal(key, items);
+    if (!info.state) return items;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const r = await fetch(`api/state/${key}`, {
+          method: "PUT", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ version: this.version[key] ?? 0, data: items }),
+        });
+        if (r.status === 409) {
+          const cur = await r.json();
+          this.version[key] = cur.version;
+          // Someone else wrote first: redo this change on top of theirs.
+          items = merge && Array.isArray(cur.data) ? merge(cur.data) : items;
+          this.setLocal(key, items);
+          continue;
+        }
+        if (!r.ok) throw new Error((await r.json()).error ?? r.statusText);
+        this.version[key] = (await r.json()).version;
+        return items;
+      } catch (e) { this.offline(e); return items; }
+    }
+    return items;
+  },
+  offline(e) {
+    if (this.warned) return;
+    this.warned = true;
+    status(`lists kept in this browser only: ${e.message}`, true);
+  },
+};
+
+/**
  * The reading list. Articles marked "to read" or "read", in localStorage like the
  * saved views. It shows in three places: on the disc as a halo (gold to read, green
  * read -- the page draws it from a `mark` on the node), on the card as a tag and a
@@ -2148,21 +2216,20 @@ setInterval(() => {
  * here, to the view data, before the disc is built: the server never hears of it.
  */
 const reading = {
-  KEY: "wikigraph.reading",
-  list() {
-    try { const v = JSON.parse(localStorage.getItem(this.KEY) ?? "[]"); return Array.isArray(v) ? v : []; }
-    catch { return []; }
-  },
-  store(items) {
-    try { localStorage.setItem(this.KEY, JSON.stringify(items)); }
-    catch (e) { status(`could not save: ${e.message}`, true); }
+  list() { return store.local("reading"); },
+  // `change` re-applies this edit to a record someone else wrote first.
+  store(items, change) {
+    store.push("reading", items, change).then(() => this.render());
     this.render();
   },
   get(title) { return this.list().find((s) => s.title === title)?.state ?? null; },
   /** state: "toread" | "read" | null (unmark). Newest first, one entry per title. */
   set(title, state) {
-    const rest = this.list().filter((s) => s.title !== title);
-    this.store(state ? [{ title, state, at: new Date().toISOString() }, ...rest] : rest);
+    const apply = (list) => {
+      const rest = list.filter((s) => s.title !== title);
+      return state ? [{ title, state, at: new Date().toISOString() }, ...rest] : rest;
+    };
+    this.store(apply(this.list()), apply);
     // The dot on screen follows without a redraw: the halo is read from the node.
     const api = disc.api(), id = api?.idOf(title);
     if (id) { api.graph.setNodeAttribute(id, "mark", state); api.renderer.refresh(); }
@@ -2344,15 +2411,10 @@ reading.render();
  * and import as JSON is how a list moves between machines.
  */
 const saved = {
-  KEY: "wikigraph.saved",
   title: "",                      // of the view on screen, from the last draw
-  list() {
-    try { const v = JSON.parse(localStorage.getItem(this.KEY) ?? "[]"); return Array.isArray(v) ? v : []; }
-    catch { return []; }
-  },
-  store(items) {
-    try { localStorage.setItem(this.KEY, JSON.stringify(items)); }
-    catch (e) { status(`could not save: ${e.message}`, true); }
+  list() { return store.local("saved"); },
+  store(items, change) {
+    store.push("saved", items, change).then(() => this.render());
     this.render();
   },
   here() { return location.hash; },
@@ -2361,11 +2423,12 @@ const saved = {
   toggle() {
     const hash = this.here();
     if (!hash) return;
-    if (this.has(hash)) { this.store(this.list().filter((s) => s.hash !== hash)); return; }
+    if (this.has(hash)) { const drop = (l) => l.filter((s) => s.hash !== hash); this.store(drop(this.list()), drop); return; }
     const title = this.title || $("q").value.trim() || $("view").selectedOptions[0].text;
-    this.store([{ hash, title, at: new Date().toISOString() }, ...this.list()]);
+    const add = (l) => [{ hash, title, at: new Date().toISOString() }, ...l.filter((s) => s.hash !== hash)];
+    this.store(add(this.list()), add);
   },
-  remove(hash) { this.store(this.list().filter((s) => s.hash !== hash)); },
+  remove(hash) { const drop = (l) => l.filter((s) => s.hash !== hash); this.store(drop(this.list()), drop); },
   open(hash) {
     this.hide();
     if (hash === location.hash) return;
@@ -2429,7 +2492,8 @@ const saved = {
     const have = new Set(this.list().map((s) => s.hash));
     const add = items.filter((s) => s && typeof s.hash === "string" && s.hash.startsWith("#") && !have.has(s.hash))
                      .map((s) => ({ hash: s.hash, title: String(s.title ?? s.hash), at: s.at ?? new Date().toISOString() }));
-    this.store([...this.list(), ...add]);
+    const append = (l) => { const h = new Set(l.map((s) => s.hash)); return [...l, ...add.filter((s) => !h.has(s.hash))]; };
+    this.store(append(this.list()), append);
     status(`${add.length} view${add.length === 1 ? "" : "s"} imported`);
   },
 };
@@ -2447,6 +2511,11 @@ document.addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") saved.hide(); });
 saved.render();
+
+// The lists first: the reading marks go onto the first disc, and the star reflects
+// what is saved. Served from the cache when the server has no state store.
+await Promise.all([store.pull("reading"), store.pull("saved")]);
+reading.render(); saved.render();
 
 readHash();
 syncControls();

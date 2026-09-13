@@ -7,8 +7,8 @@
  */
 
 import { createServer, request as httpRequest } from "node:http";
-import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { existsSync, readdirSync, realpathSync, statSync, mkdirSync } from "node:fs";
+import { readFile, writeFile, rename } from "node:fs/promises";
 import { basename, extname, join, normalize } from "node:path";
 import { WikiGraph, PreviousBuild, KIND, KIND_NAMES } from "./graph.mjs";
 
@@ -33,6 +33,15 @@ const WEB_DIR = process.env.WEB_DIR ?? "web";
 const KIWIX_URL = (process.env.KIWIX_URL ?? "").replace(/\/$/, "");
 const KIWIX_BOOK = process.env.KIWIX_BOOK ?? "";
 const MAX_NODES = Number(process.env.MAX_NODES ?? 6000);
+// Where the reader's own state lives -- reading list, saved views -- as one small JSON
+// file per key. The only place the API writes. Empty disables it, and the page keeps
+// everything in the browser as before. One user on a LAN: no login, and the README
+// says so.
+const STATE_DIR = process.env.STATE_DIR ?? "";
+if (STATE_DIR) {
+  try { mkdirSync(STATE_DIR, { recursive: true }); }
+  catch (e) { console.error(`wikigraph: cannot create STATE_DIR ${STATE_DIR}: ${e.message}`); }
+}
 // Development only. In production Caddy routes /kiwix/* to the kiwix container on the
 // same hostname, which is what lets the page fetch article text same-origin. With no
 // Caddy in front (a laptop, or a single-port setup) this forwards the same prefix to a
@@ -264,6 +273,8 @@ const server = createServer(async (req, res) => {
           // kiwix-serve exposes an article at /content/<book>/<Title>. The book name
           // is the ZIM's filename without its extension.
           reader: KIWIX_URL && KIWIX_BOOK ? `${KIWIX_URL}/content/${KIWIX_BOOK}` : null,
+          // Whether the reading list and saved views are kept here, across devices.
+          state: !!STATE_DIR,
           // And its full-text search, an RSS feed of hits over the ZIM's own index:
           // append &pattern=...&start=...&pageLength=... (140 per page at most).
           textSearch: KIWIX_URL && KIWIX_BOOK ? `${KIWIX_URL}/search?content=${KIWIX_BOOK}&format=xml` : null,
@@ -517,6 +528,33 @@ const server = createServer(async (req, res) => {
       }
 
       default:
+        // Personal state: GET returns {version, data}, PUT takes the same and refuses
+        // (409, with the current record) when the version is not the one on disk, so
+        // two tabs cannot clobber each other unknowingly. Written to a temp file and
+        // renamed, so a reader never sees half a record.
+        if (url.pathname.startsWith("/api/state/")) {
+          if (!STATE_DIR) return json(res, 404, { error: "no STATE_DIR: state stays in the browser" });
+          const key = url.pathname.slice("/api/state/".length);
+          if (!/^[a-z][a-z0-9_-]{0,31}$/.test(key)) return json(res, 400, { error: "key: lowercase letters, digits, - and _" });
+          const file = join(STATE_DIR, `${key}.json`);
+          const current = async () => {
+            try { return JSON.parse(await readFile(file, "utf8")); } catch { return { version: 0, data: null }; }
+          };
+          if (req.method === "GET") return json(res, 200, await current());
+          if (req.method === "PUT") {
+            const body = await readJson(req);
+            if (typeof body?.version !== "number" || !("data" in body)) return json(res, 400, { error: "body: {version, data}" });
+            const cur = await current();
+            if (body.version !== cur.version) return json(res, 409, { error: "version conflict", ...cur });
+            const next = { version: cur.version + 1, data: body.data, at: new Date().toISOString() };
+            const text = JSON.stringify(next);
+            if (text.length > 4e6) return json(res, 413, { error: "state over 4 MB" });
+            await writeFile(`${file}.tmp`, text);
+            await rename(`${file}.tmp`, file);
+            return json(res, 200, next);
+          }
+          return json(res, 405, { error: "GET or PUT" });
+        }
         return serveStatic(url, res);
     }
   } catch (err) {

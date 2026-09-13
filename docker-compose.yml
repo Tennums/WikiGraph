@@ -45,8 +45,12 @@ services:
       # 10k nodes at 14 fps. Raising this past ~6000 trades the animation for size.
       MAX_NODES: ${MAX_NODES:-6000}
       MIN_LEN_DEFAULT: ${MIN_LEN_DEFAULT:-1000}
+      # The reading list and saved views, as small JSON files: the one thing the API
+      # writes, so they follow you from the Mac to the iPad. One user, LAN, no login.
+      STATE_DIR: /data/state
     volumes:
       - ${DATA_DIR:-/media/vault/WikiGraph}/graph:/data/graph:ro
+      - ${DATA_DIR:-/media/vault/WikiGraph}/state:/data/state
     networks:
       - proxy
     healthcheck:
