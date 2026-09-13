@@ -1175,6 +1175,44 @@ async function articleFacts(label, el) {
     el.append(box);
   }
 
+  // Who cites it: a thin stacked bar of the in-links by topic, in the wedge colours,
+  // the top three named; and a warning when most of the in-degree is list pages or
+  // infobox plumbing -- enumerated rather than cited.
+  const cb = f.citedBy;
+  if (cb && cb.total > 0) {
+    const box = document.createElement("div");
+    box.className = "cited";
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    const colour = (t) => disc.api()?.colorOf?.(t) || "#8b93a1";
+    for (const { topic, n } of cb.topics) {
+      const seg = document.createElement("i");
+      seg.style.width = `${(100 * n / cb.total).toFixed(2)}%`;
+      seg.style.background = topic === "(uncategorised)" ? "#4a5160" : colour(topic);
+      seg.title = `${topic}: ${n.toLocaleString()} (${Math.round(100 * n / cb.total)}%)`;
+      bar.append(seg);
+    }
+    const line = document.createElement("div");
+    line.className = "line";
+    const lead = document.createElement("span"); lead.textContent = "cited by"; lead.style.color = "var(--text-3)";
+    line.append(lead);
+    for (const { topic, n } of cb.topics.slice(0, 3)) {
+      const sp = document.createElement("span");
+      const sw = document.createElement("i"); sw.className = "sw"; sw.style.background = topic === "(uncategorised)" ? "#4a5160" : colour(topic);
+      sp.append(sw, `${topic} ${Math.round(100 * n / cb.total)}%`);
+      line.append(sp);
+    }
+    box.append(bar, line);
+    const listy = (cb.kinds.list ?? 0) + (cb.kinds.infra ?? 0) + (cb.kinds.date ?? 0);
+    if (cb.total >= 20 && listy / cb.total >= 0.5) {
+      const w = document.createElement("div");
+      w.className = "warn";
+      w.textContent = `${Math.round(100 * listy / cb.total)}% of its in-links are lists, dates or infobox pages: enumerated more than cited`;
+      box.append(w);
+    }
+    el.append(box);
+  }
+
   // Since the previous build: in-links that arrived and left. Counts on the line,
   // titles behind a toggle; an arrival on the disc selects its dot.
   const sn = f.since;

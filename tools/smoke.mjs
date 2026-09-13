@@ -188,6 +188,17 @@ test("article: facts, rank, categories, since", async () => {
   // describing categories before organising ones
   const firstOrg = a.categories.findIndex((c) => c.organising);
   if (firstOrg >= 0) assert.ok(a.categories.slice(firstOrg).every((c) => c.organising), "organising last");
+  assert.ok(a.citedBy && a.citedBy.total === a.indeg, "citedBy covers every in-link");
+  assert.equal(a.citedBy.topics.reduce((s, t) => s + t.n, 0), a.indeg, "topics sum to the in-degree");
+  assert.equal(Object.values(a.citedBy.kinds).reduce((s, n) => s + n, 0), a.indeg, "kinds sum to the in-degree");
+  if (FACTS) {
+    // Biographies link to him as much as physics does: People 42%, Science 30%.
+    assert.ok(["People", "Science"].includes(a.citedBy.topics[0].topic), `Einstein cited mostly by ${a.citedBy.topics[0].topic}`);
+    const list = (await get("/api/article?title=List%20of%20countries")).body;
+    const listy = (list.citedBy.kinds.list ?? 0) + (list.citedBy.kinds.infra ?? 0) + (list.citedBy.kinds.date ?? 0);
+    assert.ok(list.citedBy.total > 0, "a list page has in-links");
+    console.log(`    List of countries: ${Math.round(100 * listy / list.citedBy.total)}% listy in-links of ${list.citedBy.total}`);
+  }
   if (info.previous) {
     assert.ok(a.since && a.since.build === info.previous, "since carries the previous build");
     assert.ok(Array.isArray(a.since.gained) && Array.isArray(a.since.lost));

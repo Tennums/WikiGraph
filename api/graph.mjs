@@ -380,6 +380,34 @@ export class WikiGraph {
       rank: this.rankOf(idx), of: this.n,
       categories: cats,
       since: this.since(idx),
+      citedBy: this.citedBy(idx),
+    };
+  }
+
+  /**
+   * Who cites an article: its in-neighbours by topic and by kind. The difference
+   * between an article that matters and one that is merely enumerated -- a high
+   * in-degree that is four fifths list pages is an index entry, not an influence.
+   * One GROUP BY per chunk of in-neighbour ids; kinds from the array.
+   */
+  citedBy(idx) {
+    const ids = this.in.neighbours(idx);
+    const total = ids.length;
+    const topics = new Map();
+    const kinds = new Int32Array(KIND_NAMES.length);
+    for (let at = 0; at < total; at += 5000) {
+      const chunk = Array.from(ids.subarray(at, at + 5000));
+      for (const i of chunk) kinds[this.kind[i]]++;
+      const ph = chunk.map(() => "?").join(",");
+      for (const r of this.db.prepare(`SELECT topic, count(*) AS n FROM node WHERE idx IN (${ph}) GROUP BY topic`).all(...chunk)) {
+        const t = r.topic ? String(r.topic).replace(/_/g, " ") : "(uncategorised)";
+        topics.set(t, (topics.get(t) ?? 0) + Number(r.n));
+      }
+    }
+    return {
+      total,
+      topics: [...topics.entries()].sort((a, b) => b[1] - a[1]).map(([topic, n]) => ({ topic, n })),
+      kinds: Object.fromEntries(KIND_NAMES.map((k, i) => [k, kinds[i]]).filter(([, n]) => n > 0)),
     };
   }
 

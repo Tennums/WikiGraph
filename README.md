@@ -178,6 +178,13 @@ every hop and lands under the bar as a numbered explanation of the route — *Sc
 Black hole*: "This idea helped scientists understand things like **black holes**…". Parsed
 documents are cached, a few dozen at a time, and shared with the preview.
 
+**Who cites it.** Under the rank line, a thin bar of the article's in-links by topic in
+the wedge colours, the top three named — *cited by Science 41%, People 27%, Society 12%*
+— from `/api/article`'s `citedBy` (one `GROUP BY` per chunk of in-neighbour ids, kinds from
+the array). When half or more of the in-links come from lists, dates or infobox plumbing
+the card says so in orange: a high in-degree that is mostly list pages is an index entry,
+not an influence.
+
 **The card says where an article stands.** Under the preview: *#5,874 of 284,808* by
 in-degree (and by PageRank), links in and out over the whole wiki, length — from
 `/api/article`, answered by a binary search over a sorted copy of each signal made on first
