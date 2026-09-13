@@ -401,6 +401,14 @@ docker compose --profile ingest run --rm ingest --wiki enwiki --meta-only
 It refuses if the CSR is missing or its article count disagrees with the page dump, and
 checks both before reading a dump rather than half an hour in.
 
+**Smoke test.** `node tools/smoke.mjs [graph dir]` starts the API against a build (default
+`data/graph`, `WIKI` from the environment), calls every route once and checks the shape of
+each answer plus a handful of simplewiki facts — *Albert Einstein* first for "einstein",
+*Cheese → Black hole* in three hops, *Mercury* offering the planet, the element and the
+god — and runs `compare.py` when two builds are there. Two seconds; non-zero exit on the
+first surprise; the facts are skipped on another wiki (`SMOKE_FACTS=0`). Run it after any
+change to `api/`.
+
 `./ingest` is bind-mounted over the copy in the image, so edits to the ingest take effect
 on the next run with no rebuild. **The API is not** — it is a service, and its image is
 meant to be immutable — so after changing anything under `api/` or `web/`:
