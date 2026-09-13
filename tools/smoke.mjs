@@ -199,6 +199,8 @@ test("article: facts, rank, categories, since", async () => {
     assert.ok(list.citedBy.total > 0, "a list page has in-links");
     console.log(`    List of countries: ${Math.round(100 * listy / list.citedBy.total)}% listy in-links of ${list.citedBy.total}`);
   }
+  assert.ok(Array.isArray(a.history) && a.history.length === (info.builds?.length ?? 0) + 1, "history: one point per build, plus now");
+  assert.equal(a.history.at(-1).indeg, a.indeg, "the last point is now");
   if (info.previous) {
     assert.ok(a.since && a.since.build === info.previous, "since carries the previous build");
     assert.ok(Array.isArray(a.since.gained) && Array.isArray(a.since.lost));
@@ -440,6 +442,21 @@ test("view: the new-links lens", { skip: !info.previous }, async () => {
   assert.ok(Array.isArray(r.body.since.newArticles) && Number.isInteger(r.body.since.newArticleCount), "new articles listed");
   assert.ok(r.body.since.newArticles.every((t) => r.body.nodes.some((n) => n.label === t)), "new articles are on the disc");
   if (FACTS) assert.ok(fresh > 0, "the new season shows");
+});
+
+test("view: fastest growing", { skip: !info.growthMonths }, async () => {
+  const r = await get(`/api/view/growth?months=1&limit=200&${HIDE}`);
+  assert.equal(r.status, 200);
+  checkView(r.body, { minNodes: 20 });
+  assert.ok(r.body.growth && r.body.growth.builds >= 1, "growth block");
+  assert.ok(r.body.nodes.every((n) => /^\+[\d,]+ in-links \(/.test(n.type)), "gain as type");
+  assert.equal(r.body.nodes[0].size, 1, "biggest gain is the largest dot");
+  if (FACTS && info.previous === "20260801") {
+    const top = r.body.nodes.slice(0, 10).map((n) => n.label);
+    assert.ok(top.includes("Palestine"), `Palestine near the top: ${top}`);
+  }
+  const many = await get(`/api/view/growth?months=12&limit=50&${HIDE}`);
+  assert.equal(many.status, 200);
 });
 
 test("view: a disambiguation seed offers choices", async () => {

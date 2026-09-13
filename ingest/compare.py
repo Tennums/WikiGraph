@@ -19,6 +19,7 @@ the ingest just spent two hours, so this is not where to economise on clarity.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sqlite3
 import sys
@@ -149,6 +150,28 @@ def report(wiki: str, old: dict, new: dict) -> list[str]:
     return out
 
 
+def write_growth(wiki: str, old: dict, new: dict, new_dir: Path, top: int = 5000) -> Path:
+    """The per-article in-degree gains, old build -> new, for the API's "fastest growing".
+
+    Matched by title like the report; arrivals count from zero. Only the top few
+    thousand gains are kept -- the tail is noise and the file is read on every request.
+    Written beside the build it describes, named for the pair.
+    """
+    old_deg = {t: int(d) for t, d in zip(old["titles"], old["indeg"])}
+    rows = []
+    for i, t in enumerate(new["titles"]):
+        d_new = int(new["indeg"][i])
+        d_old = old_deg.get(t, 0)
+        if d_new > d_old:
+            rows.append((d_new - d_old, t, d_old, d_new))
+    rows.sort(reverse=True)
+    out = {"wiki": wiki, "previous": old["name"], "build": new["name"],
+           "top": [[t, d_old, d_new] for _, t, d_old, d_new in rows[:top]]}
+    path = new_dir / f"{wiki}.growth.json"
+    path.write_text(json.dumps(out), encoding="utf-8")
+    return path
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--wiki", default="simplewiki")
@@ -156,6 +179,8 @@ def main() -> None:
     ap.add_argument("new", type=Path, help="directory of the build just made")
     ap.add_argument("--out", type=Path, default=None,
                     help="where to write the report (default: <new>/<wiki>.changes.txt)")
+    ap.add_argument("--no-growth", action="store_true",
+                    help="do not write <new>/<wiki>.growth.json (the per-article gains the API serves)")
     args = ap.parse_args()
     t0 = time.time()
     old = load(args.old.resolve(), args.wiki)
@@ -165,6 +190,9 @@ def main() -> None:
     sys.stdout.write(text)
     out = args.out or (args.new / f"{args.wiki}.changes.txt")
     out.write_text(text, encoding="utf-8")
+    if not args.no_growth:
+        gpath = write_growth(args.wiki, old, new, args.new.resolve())
+        print(f"growth written to {gpath}", file=sys.stderr)
     print(f"\nwritten to {out}  ({time.time() - t0:.0f}s)", file=sys.stderr)
 
 

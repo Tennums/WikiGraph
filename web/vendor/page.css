@@ -639,6 +639,8 @@
   .vault-graph #vg-detail .facts .more { font-size: 10px; color: var(--text-3); background: none; border: 0; cursor: pointer; padding: 1px 4px; }
   .vault-graph #vg-detail .facts .since { margin-top: 4px; }
   .vault-graph #vg-detail .facts .cited { margin: 6px 0 2px; }
+  .vault-graph #vg-detail .facts .hist { display: inline-flex; align-items: center; gap: 6px; }
+  .vault-graph #vg-detail .facts .spark { display: inline-block; vertical-align: middle; }
   .vault-graph #vg-detail .facts .cited .bar { display: flex; height: 5px; border-radius: 3px; overflow: hidden; background: var(--border); margin-bottom: 3px; }
   .vault-graph #vg-detail .facts .cited .bar i { display: block; height: 100%; }
   .vault-graph #vg-detail .facts .cited .sw { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; }

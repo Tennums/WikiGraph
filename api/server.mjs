@@ -7,7 +7,7 @@
  */
 
 import { createServer, request as httpRequest } from "node:http";
-import { existsSync, readdirSync, realpathSync, statSync, mkdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync, mkdirSync } from "node:fs";
 import { readFile, writeFile, rename } from "node:fs/promises";
 import { basename, extname, join, normalize } from "node:path";
 import { WikiGraph, PreviousBuild, KIND, KIND_NAMES } from "./graph.mjs";
@@ -80,20 +80,37 @@ const graph = new WikiGraph(join(GRAPH_DIR, `${WIKI}.csr`), join(GRAPH_DIR, `${W
 // directory just below the current one by name. Only its in-link graph and title
 // table are opened (~60 MB resident for enwiki); everything "since last month" -- the
 // card's arrived and left in-links, the new-links lens -- comes from comparing the two.
+// Every earlier dated build with its in-link graph and title table, oldest first,
+// the newest of them being "the previous build". Each holds its rcsr offsets resident
+// (~55 MB for enwiki), so at most MAX_BUILDS of them are opened; older ones on disk are
+// history the card no longer shows.
+const MAX_BUILDS = Number(process.env.MAX_BUILDS ?? 12);
+graph.builds = [];
 graph.previous = null;
 if (BUILD) {
-  const dated = readdirSync(GRAPH_ROOT).filter((d) => /^\d{8}$/.test(d) && d < BUILD).sort();
-  const prevName = dated[dated.length - 1];
-  const prevDir = prevName && join(GRAPH_ROOT, prevName);
-  if (prevDir && existsSync(join(prevDir, `${WIKI}.rcsr`)) && existsSync(join(prevDir, `${WIKI}.db`))) {
-    try {
-      graph.previous = new PreviousBuild(prevDir, WIKI, prevName);
-      console.log(`wikigraph: previous build ${prevName} opened for "since last month"`);
-    } catch (e) {
-      console.log(`wikigraph: previous build ${prevName} unusable (${e.message}); no "since" comparisons`);
-    }
+  const dated = readdirSync(GRAPH_ROOT).filter((d) => /^\d{8}$/.test(d) && d < BUILD).sort().slice(-MAX_BUILDS);
+  for (const name of dated) {
+    const dir = join(GRAPH_ROOT, name);
+    if (!existsSync(join(dir, `${WIKI}.rcsr`)) || !existsSync(join(dir, `${WIKI}.db`))) continue;
+    try { graph.builds.push(new PreviousBuild(dir, WIKI, name)); }
+    catch (e) { console.log(`wikigraph: build ${name} unusable (${e.message}); skipped`); }
+  }
+  graph.previous = graph.builds[graph.builds.length - 1] ?? null;
+  if (graph.previous) {
+    console.log(`wikigraph: ${graph.builds.length} earlier build${graph.builds.length === 1 ? "" : "s"} opened ` +
+                `(${graph.builds.map((b) => b.name).join(", ")}); "since last month" compares with ${graph.previous.name}`);
   }
 }
+// The per-build growth files compare.py writes: <graph>/<build>/<wiki>.growth.json,
+// each the in-degree gains from the build before it. Read once, kept.
+const growthFiles = new Map();
+const growthOf = (name) => {
+  if (growthFiles.has(name)) return growthFiles.get(name);
+  let g = null;
+  try { g = JSON.parse(readFileSync(join(GRAPH_ROOT, name, `${WIKI}.growth.json`), "utf8")); } catch {}
+  growthFiles.set(name, g);
+  return g;
+};
 
 if (!graph.rank) {
   console.log(`wikigraph: no ${WIKI}.rank -- ranking by in-degree only; add PageRank with\n` +
@@ -268,6 +285,9 @@ const server = createServer(async (req, res) => {
           ...graph.meta,
           build: BUILD,
           previous: graph.previous?.name ?? null,
+          builds: graph.builds.map((b) => b.name),
+          // how many months back "fastest growing" can look: the growth files present
+          growthMonths: BUILD ? [BUILD, ...graph.builds.map((b) => b.name).reverse()].filter((n) => growthOf(n)).length : 0,
           maxNodes: MAX_NODES,
           kinds: Object.fromEntries(KIND_NAMES.map((k, i) => [k, graph.kindCounts[i]])),
           search: graph.fts ? "fulltext" : "prefix",
@@ -352,11 +372,64 @@ const server = createServer(async (req, res) => {
         return json(res, 200, graph.categoryInfo(pid));
       }
 
-      /* One article's facts, for the card: rank, categories, degrees. */
+      /* One article's facts, for the card: rank, categories, degrees, and its
+         in-degree in every earlier build on disk. */
       case "/api/article": {
         const i = graph.lookup(q.get("title") ?? "");
         if (i < 0) return json(res, 404, { error: `no article "${q.get("title")}"` });
-        return json(res, 200, graph.article(i));
+        const a = graph.article(i);
+        const title = graph.titleOf(i);
+        a.history = [
+          ...graph.builds.map((b) => { const o = b.idxOf(title); return { build: b.name, indeg: o < 0 ? null : b.in.degree(o) }; }),
+          { build: BUILD ?? "current", indeg: graph.indeg[i] },
+        ];
+        return json(res, 200, a);
+      }
+
+      /* The fastest-growing articles over the last N builds: the per-build growth
+         files summed by title, filters applied, gain as dot size. */
+      case "/api/view/growth": {
+        if (!BUILD) return json(res, 404, { error: "no dated builds: growth needs the monthly refresh" });
+        const names = [BUILD, ...graph.builds.map((b) => b.name).reverse()];
+        const months = Math.max(1, Math.min(names.length, Number(q.get("months")) || 1));
+        const gain = new Map();   // title -> [gain, from, to]
+        let used = 0;
+        for (const name of names.slice(0, months)) {
+          const g = growthOf(name);
+          if (!g) continue;
+          used++;
+          for (const [title, from, to] of g.top) {
+            const cur = gain.get(title);
+            if (cur) { cur[0] += to - from; cur[1] = from; } else gain.set(title, [to - from, from, to]);
+          }
+        }
+        if (!used) return json(res, 404, { error: `no growth file for ${names[0]}: run the refresh, or compare.py on the two builds` });
+        const w = within(q);
+        if (w.error) return json(res, 404, { error: w.error });
+        const ok = graph.allow(hidden(q), minLen(q), w.mask);
+        const limit = budget(q.get("limit"), 500);
+        const ranked = [...gain.entries()].sort((a, b) => b[1][0] - a[1][0]);
+        const ids = [], of = new Map();
+        for (const [title, [d, from, to]] of ranked) {
+          if (ids.length >= limit) break;
+          const i = graph.lookup(title);
+          if (i < 0 || !ok(i)) continue;
+          ids.push(i); of.set(i, { d, from, to });
+        }
+        if (!ids.length) return json(res, 404, { error: "nothing grew under the current filters" });
+        const first = names[Math.min(months, used) - 1];
+        const data = graph.toVaultData(ids, {
+          title: `Fastest growing since ${graph.builds.find((b) => b.name < first)?.name ?? "the first build"}` + (w.name ? ` · within ${w.name}` : ""),
+          mutual: wantMutual(q), group: groupBy(q), size: sizeBy(q),
+          typeOf: (id) => { const g = of.get(id); return `+${g.d.toLocaleString()} in-links (${g.from.toLocaleString()} → ${g.to.toLocaleString()})`; },
+        });
+        if (sizeBy(q) === "degree") {
+          const max = Math.log1p(of.get(ids[0]).d) || 1;
+          data.nodes.forEach((node, i) => { node.size = Number((Math.log1p(of.get(ids[i]).d) / max).toFixed(3)); });
+        }
+        data.growth = { builds: used, months, candidates: gain.size };
+        if (w.mask) data.within = { name: w.name, articles: w.mask.count, categories: w.mask.categories };
+        return json(res, 200, withSince(q, data));
       }
 
       /* Every view returns the same VAULT_DATA shape; only the selection differs. */

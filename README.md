@@ -178,6 +178,16 @@ every hop and lands under the bar as a numbered explanation of the route — *Sc
 Black hole*: "This idea helped scientists understand things like **black holes**…". Parsed
 documents are cached, a few dozen at a time, and shared with the preview.
 
+**History across builds.** The API opens every earlier dated build it finds beside
+`current` (their in-link graphs and title tables; at most `MAX_BUILDS`, 12, since each holds
+~55 MB of offsets for enwiki), and the card draws an article's in-degree per build as a
+sparkline — *1,204 → 1,431 in-links over 4 builds*, the numbers on hover. *Fastest growing*
+ranks the articles whose in-degree grew most over the last N builds, from the
+`<wiki>.growth.json` that `compare.py` now writes beside each build (its top 5,000 gains
+against the build before), summed by title; gain as dot size, `+N in-links (from → to)` on
+the card. Both say something after the third refresh; for now, on the Mac's two builds,
+*Palestine* leads.
+
 **Who cites it.** Under the rank line, a thin bar of the article's in-links by topic in
 the wedge colours, the top three named — *cited by Science 41%, People 27%, Society 12%*
 — from `/api/article`'s `citedBy` (one `GROUP BY` per chunk of in-neighbour ids, kinds from
