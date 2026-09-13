@@ -438,6 +438,33 @@ export class WikiGraph {
   }
 
   /**
+   * The choices a disambiguation page offers: what it links to, the most linked-to
+   * first, with each one's topic so "Mercury (planet) · Science" reads at a glance.
+   * The kind and category filters apply to the options -- but not the disambiguation
+   * filter, whose whole point these options are, and not the length filter: a dab's
+   * list is short and a two-paragraph "Mercury (mythology)" is still what was meant.
+   */
+  dabOptions(idx, { hide = [], within = null, limit = 12 } = {}) {
+    const ok = this.allow(hide.filter((k) => k !== "dab"), 0, within);
+    const cands = [...this.neighbours(idx)].filter((v) => ok(v) && this.kind[v] !== KIND.dab);
+    if (!cands.length) return [];
+    const ph = cands.map(() => "?").join(",");
+    const rows = new Map(this.db.prepare(`SELECT idx, title, topic FROM node WHERE idx IN (${ph})`).all(...cands)
+      .map((r) => [Number(r.idx), r]));
+    // A dab page links to its entries -- and to the words that describe them ("a car
+    // brand of Ford Motor Company"). The entries carry the name, so they are the
+    // choices, by importance; the unnamed links are only offered when there are too
+    // few named ones to be sure the name is in the titles at all.
+    const name = this.titleOf(idx).toLowerCase().replace(/_\(disambiguation\)$/, "");
+    const named = (v) => String(rows.get(v)?.title ?? "").toLowerCase().includes(name) ? 1 : 0;
+    const byDeg = (a, b) => this.indeg[b] - this.indeg[a];
+    const entries = cands.filter(named).sort(byDeg), other = cands.filter((v) => !named(v)).sort(byDeg);
+    const ids = (entries.length >= 3 ? entries : entries.concat(other)).slice(0, limit);
+    return ids.map((i) => ({ idx: i, title: String(rows.get(i)?.title ?? i), deg: this.indeg[i],
+                             topic: rows.get(i)?.topic ? String(rows.get(i).topic).replace(/_/g, " ") : null }));
+  }
+
+  /**
    * Title search, ranked by in-degree.
    *
    * With the FTS5 index: every word the user typed becomes a prefix term, so "alb ein"
@@ -482,6 +509,17 @@ export class WikiGraph {
     // states" surfaced *Time zone* through "Time in the United States". Titles keep
     // the word-prefix behaviour; aliases are held to the name itself.
     const typed = text.toLowerCase().replace(/_/g, " ");
+    // What was typed *is* a disambiguation page: "Mercury". The page itself is not a
+    // choice, its options are; they lead the list, flagged, so the box can offer them.
+    // Or the typed title has a "(disambiguation)" page beside it, the wiki's way of
+    // saying the plain title is the main meaning and here are the others.
+    let dab = null;
+    for (const t of [text, `${text} (disambiguation)`]) {
+      const exact = this.lookup(t);
+      if (exact < 0 || this.kind[exact] !== KIND.dab) continue;
+      const options = this.dabOptions(exact, { hide, within });
+      if (options.length) { dab = { idx: exact, title: this.titleOf(exact), options }; break; }
+    }
     const best = new Map();
     for (const h of rows) {
       if (!ok(h.idx)) continue;
@@ -497,7 +535,8 @@ export class WikiGraph {
         deg: this.indeg[h.idx], score: score[h.idx],
       }))
       .sort((a, b) => b.score - a.score)
-      .slice(0, limit);
+      .slice(0, limit)
+      .concat(dab ? [{ idx: dab.idx, title: dab.title, dab: true, options: dab.options, deg: this.indeg[dab.idx], score: 0 }] : []);
   }
 
   /** Category names by prefix, biggest first -- for the category view's typeahead. */

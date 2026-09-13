@@ -10,7 +10,7 @@ import { createServer, request as httpRequest } from "node:http";
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { basename, extname, join, normalize } from "node:path";
-import { WikiGraph, PreviousBuild, KIND_NAMES } from "./graph.mjs";
+import { WikiGraph, PreviousBuild, KIND, KIND_NAMES } from "./graph.mjs";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const WIKI = process.env.WIKI ?? "simplewiki";
@@ -331,6 +331,11 @@ const server = createServer(async (req, res) => {
                     : direction === "mutual" ? `${name} — mutual links` : name)
                     + (w.name ? ` · within ${w.name}` : "");
         const data = graph.toVaultData(sel.ids, { title, depth: sel.depth, mutual, group: groupBy(q), size: sizeBy(q) });
+        // Drawn around a disambiguation page: say so, and offer what it disambiguates,
+        // so a typed "Mercury" becomes a choice rather than a disc of the options.
+        if (graph.kind[seed] === KIND.dab) {
+          data.dab = { title: name, options: graph.dabOptions(seed, { hide: hidden(q), within: w.mask }) };
+        }
         // The article the disc is drawn around sits in the hub, as a path's steps do:
         // the one dot the view is about should never have to be found on the rim.
         data.pinned = positionsOf(sel.ids, [seed]);

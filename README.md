@@ -96,6 +96,15 @@ section. On simplewiki: *Mass ×5, Particle ×4, Energy ×4, Speed of light, Sci
 cached; the set is drawn through `/api/view/set` with the article pinned. Whether the
 order convinces is a judgement made on screen, which is why it is marked experimental.
 
+**Disambiguation pages are a choice, not a hit.** Type "Mercury" and the box offers
+*Mercury (element) · Science*, *Mercury (planet)*, *Freddie Mercury*, *Mercury
+(mythology)* before anything else — the page's own entries, the ones that carry the name,
+by importance; the words a dab page also links to ("a car brand of *Ford Motor Company*")
+are held back unless there are fewer than three named entries. A "(disambiguation)" page
+beside a plain title is tried too. The length filter does not apply here: a dab's list is
+short and a two-paragraph *Mercury (mythology)* is still what was meant. Draw around a dab
+page anyway and a strip says so and offers the same choices, each a redraw.
+
 **Full text, not just titles.** The ZIM carries a Xapian index and kiwix-serve exposes it
 as an RSS feed (`/search?…&format=xml`, 140 hits a page), so *Articles that mention
 "Antwerp"* is the page asking Kiwix for the first thousand hits, four pages in flight at a

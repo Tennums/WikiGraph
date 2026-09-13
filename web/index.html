@@ -101,6 +101,18 @@
   #trailClear { padding: 0 6px; font: inherit; color: #8b93a1; background: transparent;
                 border: 1px solid transparent; }
   #trailClear:hover { border-color: #333944; color: #e8e8ea; }
+  /* Drawn around a disambiguation page: the choices it stands for. */
+  #dab { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 12px;
+         background: #2a2418; border-bottom: 1px solid #4a3f24; font-size: 12px; }
+  #dab[hidden] { display: none; }
+  #dabText { color: #e8e8ea; }
+  #dabText b { color: #ffd166; }
+  #dabChoices { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+  #dabChoices button { padding: 2px 8px; }
+  #dabChoices button small { color: #8b93a1; margin-left: 4px; }
+  #dabClose { margin-left: auto; padding: 0 6px; font: inherit; color: #8b93a1; background: transparent;
+              border: 1px solid transparent; }
+  #dabClose:hover { border-color: #333944; color: #e8e8ea; }
   /* The reading order: the basics, then what the article builds on, then the article. */
   #order { display: flex; gap: 6px; align-items: flex-start; padding: 6px 12px;
            background: #181b20; border-bottom: 1px solid #2c313a; font-size: 12px; max-height: 38vh; overflow: auto; }
@@ -328,6 +340,12 @@
 <div id="trail" hidden>
   <span id="trailItems"></span>
   <button id="trailClear" title="Forget this walk">&times;</button>
+</div>
+
+<div id="dab" hidden>
+  <span id="dabText"></span>
+  <span id="dabChoices"></span>
+  <button id="dabClose" title="Keep this disc" aria-label="Keep this disc">&times;</button>
 </div>
 
 <div id="order" hidden>
@@ -608,6 +626,7 @@ async function draw({ push = true, fromGame = false } = {}) {
   trailRecord(view, data.pinned?.length ? data.nodes[Number(data.pinned[0])].label : q);
   pathWhy(data.pathTitles);
   orderStrip(data.order, data);
+  dabStrip(data.dab);
   saved.drawn(data.vault);
 
   status((data.since ? `${data.since.newEdges.toLocaleString()} links new since ${data.since.build} · ` : "") +
@@ -1276,6 +1295,26 @@ async function readingOrder(q) {
            titles: [title, ...L1, ...L2] };
 }
 
+/**
+ * Drawn around a disambiguation page -- "Mercury" typed and drawn as is. The disc is
+ * then a disc of the options, which is not nothing, but the wiki would have asked
+ * which one; so does this, in a strip: each choice redraws around it.
+ */
+function dabStrip(dab) {
+  const box = $("dab");
+  if (!dab || !dab.options?.length) { box.hidden = true; return; }
+  $("dabText").innerHTML = `<b>${dab.title}</b> is a disambiguation page. Did you mean:`;
+  $("dabChoices").replaceChildren(...dab.options.map((o) => {
+    const b = document.createElement("button");
+    b.textContent = o.title.replace(/_/g, " ");
+    if (o.topic) { const sm = document.createElement("small"); sm.textContent = o.topic; b.append(sm); }
+    b.addEventListener("click", () => { $("q").value = o.title.replace(/_/g, " "); draw(); });
+    return b;
+  }));
+  box.hidden = false;
+}
+$("dabClose").addEventListener("click", () => { $("dab").hidden = true; });
+
 /** The order as a strip under the bar, trimmed to what the server kept (the filters). */
 function orderStrip(order, data) {
   const box = $("order"), body = $("orderBody");
@@ -1536,9 +1575,16 @@ const typeahead = (el) => () => {
                                     (w && !kind ? `&within=${encodeURIComponent(w)}` : ""))).json();
     // A hit found through a redirect shows the name that matched, so "usa" reads
     // "United States — via USA" rather than a title that does not contain the query.
-    $("hits").innerHTML = hits
+    // A disambiguation page is not a choice; its options are. They lead the list,
+    // each saying which "Mercury" it is, so the box offers the planet, the element and
+    // the god rather than the page that only lists them.
+    const dab = hits.find((h) => h.dab);
+    const choices = dab ? dab.options.map((o) =>
+      `<option value="${o.title.replace(/_/g, " ")}" label="one of ${dab.title.replace(/_/g, " ")}${o.topic ? ` · ${o.topic}` : ""}">`) : [];
+    const rest = hits.filter((h) => !h.dab && !(dab && dab.options.some((o) => o.idx === h.idx)));
+    $("hits").innerHTML = choices.concat(rest
       .map((h) => `<option value="${h.title.replace(/_/g, " ")}"` +
-                  (h.via ? ` label="via ${h.via}"` : "") + `>`).join("");
+                  (h.via ? ` label="via ${h.via}"` : "") + `>`)).join("");
   }, 180);
 };
 $("q").addEventListener("input", typeahead($("q")));
