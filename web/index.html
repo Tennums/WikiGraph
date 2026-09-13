@@ -101,6 +101,27 @@
   #trailClear { padding: 0 6px; font: inherit; color: #8b93a1; background: transparent;
                 border: 1px solid transparent; }
   #trailClear:hover { border-color: #333944; color: #e8e8ea; }
+  /* The reading order: the basics, then what the article builds on, then the article. */
+  #order { display: flex; gap: 6px; align-items: flex-start; padding: 6px 12px;
+           background: #181b20; border-bottom: 1px solid #2c313a; font-size: 12px; max-height: 38vh; overflow: auto; }
+  #order[hidden] { display: none; }
+  #orderBody { flex: 1; min-width: 0; color: #c4c9d2; }
+  #orderBody h4 { margin: 4px 0 2px; font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: #8b93a1; }
+  #orderBody h4 span { text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 6px; }
+  #orderBody ol { margin: 0 0 4px; padding-left: 22px; columns: 2; column-gap: 24px; }
+  @media (min-width: 1400px) { #orderBody ol { columns: 3; } }
+  #orderBody li { break-inside: avoid; padding: 1px 0; }
+  #orderBody li a { color: #e8e8ea; text-decoration: none; }
+  #orderBody li a:hover { color: #9fd0ff; }
+  #orderBody li .read { color: #b6f09c; margin-right: 4px; }
+  #orderBody li small { color: #8b93a1; margin-left: 6px; }
+  #orderBody li button { padding: 0 4px; margin-left: 4px; font-size: 11px; color: #8b93a1;
+                         background: transparent; border-color: transparent; }
+  #orderBody li button:hover { color: #e8e8ea; border-color: #333944; }
+  #orderBody .note { color: #8b93a1; font-style: italic; }
+  #orderClose { padding: 0 6px; font: inherit; color: #8b93a1; background: transparent;
+                border: 1px solid transparent; }
+  #orderClose:hover { border-color: #333944; color: #e8e8ea; }
   /* The path explained: one sentence per hop, under the trail. */
   #pathWhy { display: flex; gap: 6px; align-items: flex-start; padding: 6px 12px;
              background: #181b20; border-bottom: 1px solid #2c313a; font-size: 12px; }
@@ -201,6 +222,7 @@
     <option value="category">Category tree</option>
     <option value="top">Most linked-to</option>
     <option value="text" id="viewText">Articles that mention</option>
+    <option value="order" id="viewOrder">Reading order for</option>
   </select>
 
   <input type="text" id="q" list="hits" placeholder="Physics" value="Physics">
@@ -306,6 +328,11 @@
 <div id="trail" hidden>
   <span id="trailItems"></span>
   <button id="trailClear" title="Forget this walk">&times;</button>
+</div>
+
+<div id="order" hidden>
+  <div id="orderBody"></div>
+  <button id="orderClose" title="Hide the reading order" aria-label="Hide the reading order">&times;</button>
 </div>
 
 <div id="pathWhy" hidden>
@@ -477,6 +504,16 @@ async function draw({ push = true, fromGame = false } = {}) {
       });
       data = await res.json();
       if (res.ok) data.textHits = hits.total;
+    } else if (view === "order") {
+      // What the article assumes, from lead paragraphs; then the set as a disc, in
+      // reading order, and the order itself as a numbered strip.
+      const order = await readingOrder(q);
+      res = await fetch(`api/view/set?limit=${limit}${hide}`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ titles: order.titles, title: `Reading order for ${order.title}`, role: "step", pin: order.title }),
+      });
+      data = await res.json();
+      if (res.ok) data.order = order;
     } else {
       res = await fetch(url);
       data = await res.json();
@@ -570,6 +607,7 @@ async function draw({ push = true, fromGame = false } = {}) {
   // The seed's canonical title (it is the pinned node), not what was typed.
   trailRecord(view, data.pinned?.length ? data.nodes[Number(data.pinned[0])].label : q);
   pathWhy(data.pathTitles);
+  orderStrip(data.order, data);
   saved.drawn(data.vault);
 
   status((data.since ? `${data.since.newEdges.toLocaleString()} links new since ${data.since.build} · ` : "") +
@@ -1155,6 +1193,134 @@ async function snippetIn(from, to) {
 }
 
 /**
+ * Links in the lead section -- what the article names before its first heading, in
+ * order of appearance, once each. Paragraph links only: the infobox, hatnotes and
+ * figure captions in the lead are not the vocabulary the text assumes.
+ */
+function leadLinks(doc, min = 0) {
+  const root = doc.querySelector("#mw-content-text") ?? doc.body;
+  const sections = [...root.querySelectorAll("section[data-mw-section-id]")];
+  const seen = new Set(), out = [];
+  // Section 0 is the lead. A short lead (simplewiki's often is) gives too little to go
+  // on, so when fewer than `min` links come of it the next sections are read too,
+  // one at a time, until there are enough.
+  for (const lead of sections.length ? sections : [root]) {
+    if (out.length >= min && lead !== (sections[0] ?? root)) break;
+    linksIn(doc, root, lead, seen, out);
+    if (!min) break;
+  }
+  return out;
+}
+function linksIn(doc, root, lead, seen, out) {
+  // A link inside parentheses is an aside -- etymology, a pronunciation, another
+  // name: "(from Latin quantum, 'how much')" -- and Latin is not what quantum
+  // mechanics assumes. Each paragraph's text is walked once to know, at every link,
+  // whether a bracket is open.
+  const inParens = new Set();
+  for (const para of lead.querySelectorAll("p")) {
+    let depth = 0;
+    const w = doc.createTreeWalker(para, NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      const a = n.parentElement?.closest("a[href]");
+      if (a && depth > 0) inParens.add(a);
+      for (const ch of n.nodeValue) { if (ch === "(") depth++; else if (ch === ")" && depth > 0) depth--; }
+    }
+  }
+  for (const a of lead.querySelectorAll("p a[href]")) {
+    if (a.closest("table, .hatnote, .dablink, .ambox, .navbox, figure, .thumb, sup, .reference, .mw-empty-elt")) continue;
+    if (inParens.has(a)) continue;
+    // Before the first heading only, when the lead section is not marked as such.
+    if (lead === root && a.compareDocumentPosition(root.querySelector("h2") ?? a) & Node.DOCUMENT_POSITION_PRECEDING) break;
+    let t;
+    try {
+      const u = new URL(a.getAttribute("href"), doc.wgUrl);
+      if (u.origin !== location.origin || u.hash) continue;
+      t = decodeURIComponent(u.pathname.split("/").pop()).replace(/_/g, " ");
+    } catch { continue; }
+    if (!t || /^(File|Category|Help|Wikipedia|Template|Special|Portal|Talk):/i.test(t) || seen.has(t)) continue;
+    seen.add(t); out.push(t);
+  }
+}
+
+/**
+ * A reading order for an article: what it assumes, from lead paragraphs. Level one is
+ * the target's own lead links -- the concepts its first sentences lean on. Level two
+ * is what those articles' leads lean on in turn, kept only when at least two of them
+ * share it: a concept that several prerequisites name is the field's vocabulary,
+ * one that a single prerequisite names is that article's own business (Max Planck's
+ * lead names Germany; the field does not). The basics come first, then what the
+ * article builds on directly, then the article. Experimental: whether the order
+ * convinces is judged on screen.
+ */
+async function readingOrder(q) {
+  const doc0 = await fetchDoc(q);
+  if (!doc0) throw new Error(`no article "${q}" in the reader`);
+  const title = reader.titleOf(doc0.wgUrl) || q;
+  const L1 = leadLinks(doc0, 8).filter((t) => t !== title).slice(0, 24);
+  if (!L1.length) throw new Error(`"${title}" has no links in its lead paragraphs`);
+  const l1 = new Set(L1);
+  const support = new Map();
+  for (let i = 0; i < L1.length; i += 4) {
+    const docs = await Promise.all(L1.slice(i, i + 4).map(fetchDoc));
+    for (const d of docs) {
+      if (!d) continue;
+      for (const u of new Set(leadLinks(d, 6))) {
+        if (u === title || l1.has(u)) continue;
+        support.set(u, (support.get(u) ?? 0) + 1);
+      }
+    }
+  }
+  const L2 = [...support].filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([t]) => t);
+  return { title, L1, L2, support: Object.fromEntries(L2.map((t) => [t, support.get(t)])),
+           // The article first, so it is the largest dot; the basics the smallest.
+           titles: [title, ...L1, ...L2] };
+}
+
+/** The order as a strip under the bar, trimmed to what the server kept (the filters). */
+function orderStrip(order, data) {
+  const box = $("order"), body = $("orderBody");
+  if (!order) { box.hidden = true; body.replaceChildren(); return; }
+  const kept = new Map(data.nodes.map((n) => [n.label, n]));
+  body.replaceChildren();
+  const group = (name, hint, titles, byIndeg) => {
+    const rows = titles.filter((t) => kept.has(t));
+    if (!rows.length) return 0;
+    if (byIndeg) rows.sort((a, b) => (kept.get(b).indeg ?? 0) - (kept.get(a).indeg ?? 0));
+    const h = document.createElement("h4");
+    h.append(name); const sp = document.createElement("span"); sp.textContent = hint; h.append(sp);
+    const ol = document.createElement("ol");
+    for (const t of rows) {
+      const li = document.createElement("li");
+      if (reading.get(t) === "read") { const r = document.createElement("span"); r.className = "read"; r.textContent = "\u2713"; li.append(r); }
+      const a = document.createElement("a");
+      a.href = "#"; a.textContent = t; a.title = "Read it";
+      a.addEventListener("click", (e) => { e.preventDefault(); disc.api()?.select(t); reading.open(t); });
+      li.append(a);
+      const small = document.createElement("small");
+      small.textContent = order.support[t] ? `\u00d7${order.support[t]}` : "";
+      li.append(small);
+      const dr = document.createElement("button");
+      dr.innerHTML = "&#8982;"; dr.title = "Draw around this";
+      dr.addEventListener("click", () => { $("view").value = "neighborhood"; $("q").value = t; syncControls(); draw(); });
+      li.append(dr);
+      ol.append(li);
+    }
+    body.append(h, ol);
+    return rows.length;
+  };
+  const n2 = group("First, the basics", "named in the lead of two or more of the articles below (\u00d7 how many)", order.L2, false);
+  const n1 = group("Then, what it builds on", "named in its own lead paragraphs", order.L1, true);
+  const note = document.createElement("div");
+  note.className = "note";
+  note.textContent = `Then ${order.title}. ` +
+    (n1 + n2 < order.L1.length + order.L2.length ? `${order.L1.length + order.L2.length - n1 - n2} left out by the filters. ` : "") +
+    "Experimental: the order is what the lead paragraphs suggest, no more.";
+  body.append(note);
+  box.hidden = false;
+}
+$("orderClose").addEventListener("click", () => { $("order").hidden = true; });
+
+/**
  * A path, explained: under the trail, one line per hop with the sentence that makes
  * the link. Only for path views with a reader; anything else clears it. Filled as the
  * fetches come in, in order, since the first hop is the one read first.
@@ -1405,7 +1571,8 @@ const syncControls = () => {
   $("q2").hidden = $("q2Label").hidden = !two;
   $("q2Label").textContent = view === "common" ? "×" : "→";
   $("q").placeholder = view === "category" ? "Physics (category name)"
-                     : view === "text" ? "Antwerp (words in the text)" : "Physics";
+                     : view === "text" ? "Antwerp (words in the text)"
+                     : view === "order" ? "Quantum mechanics (what to read first)" : "Physics";
   $("within").disabled = $("withinLabel").hidden = view === "category";
   $("within").hidden = view === "category";
 };
@@ -1450,6 +1617,11 @@ if (info.pagerank === false) {
 if (!info.textSearch) {
   $("viewText").hidden = $("viewText").disabled = true;
   if ($("view").value === "text") $("view").value = "neighborhood";
+}
+// The reading order reads lead paragraphs, so it needs the articles too.
+if (!info.reader) {
+  $("viewOrder").hidden = $("viewOrder").disabled = true;
+  if ($("view").value === "order") $("view").value = "neighborhood";
 }
 // The server's default, so a URL without minlen and the dropdown agree.
 if (info.minLenDefault !== undefined && !location.hash.includes("minlen=")) {

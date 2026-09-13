@@ -270,7 +270,7 @@ const server = createServer(async (req, res) => {
         const data = graph.toVaultData(ids, {
           title: String(body.title ?? "a set of articles").slice(0, 200) + (w.name ? ` · within ${w.name}` : ""),
           mutual: wantMutual(q), group: groupBy(q), size: sizeBy(q),
-          typeOf: (id) => `hit #${rank.get(id) + 1}`,
+          typeOf: (id) => `${/^[a-z]{1,12}$/.test(String(body.role ?? "")) ? body.role : "hit"} #${rank.get(id) + 1}`,
         });
         if (sizeBy(q) === "degree") {
           // Rank as size: the first hit the largest, the tail small but not vanishing.
@@ -278,6 +278,11 @@ const server = createServer(async (req, res) => {
           data.nodes.forEach((node, i) => { node.size = Number((1 - Math.log1p(i) / Math.log1p(n)).toFixed(3)); });
         }
         data.set = { given: body.titles.length, drawn: ids.length, unresolved, filtered };
+        // A caller may name the article the set is about; it goes to the hub.
+        if (typeof body.pin === "string") {
+          const pinIdx = graph.lookup(body.pin);
+          if (pinIdx >= 0) data.pinned = positionsOf(ids, [pinIdx]);
+        }
         if (w.mask) data.within = { name: w.name, articles: w.mask.count, categories: w.mask.categories };
         return json(res, 200, withSince(q, data));
       }

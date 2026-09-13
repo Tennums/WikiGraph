@@ -29,6 +29,7 @@ thousand articles chosen for a reason:
 | **Common ground of two** | what both link to, and who links to both — the overlap rather than the chain; both seeds pinned | subject area |
 | **Category tree** | everything under a category, N levels deep | direct subcategories |
 | **Most linked-to** | the top articles by in-degree | subject area |
+| **Reading order for** | *experimental* — what an article assumes, from lead paragraphs: its own lead links, and what two or more of those articles' leads share; drawn as a disc with the article pinned, listed as an order under the bar | subject area |
 | **Articles that mention** | every article whose *text* contains the words, from the ZIM's own full-text index, in Kiwix's ranking; the first hit is the largest dot | subject area |
 
 **Read the article beside the disc.** The card's *Read the article* opens a panel on the
@@ -82,6 +83,18 @@ Every view is a URL. The controls mirror into the hash —
 `#view=path&q=Cheese&q2=Black+hole&limit=1000` — so a view can be bookmarked or sent,
 and the browser's back button retraces a walk. The detail card's **Draw around this**
 makes the article the new centre; each click is a page in the history.
+
+**A reading order (experimental).** *Reading order for Quantum mechanics* reads lead
+paragraphs: what an article names before its first heading is the vocabulary it assumes.
+Level one is the article's own lead links; level two is what those articles' leads name in
+turn, kept only when two or more of them share it — a concept several prerequisites name
+is the field's vocabulary, one that a single prerequisite names is that article's own
+business (Max Planck's lead names Germany; the field does not). Links inside parentheses
+are asides (etymology, pronunciation) and skipped; a short lead reads on into the next
+section. On simplewiki: *Mass ×5, Particle ×4, Energy ×4, Speed of light, Science …* then
+*Mathematics, Physics, Chemistry, Atom, Electron …* then the article. Some forty fetches,
+cached; the set is drawn through `/api/view/set` with the article pinned. Whether the
+order convinces is a judgement made on screen, which is why it is marked experimental.
 
 **Full text, not just titles.** The ZIM carries a Xapian index and kiwix-serve exposes it
 as an RSS feed (`/search?…&format=xml`, 140 hits a page), so *Articles that mention
